@@ -344,15 +344,15 @@ Page<User> users = userRepository.findAll(PageRequest.of(0, 20));
 
 ## Quick Reference Flags
 
-| Category | Red Flags |
-|----------|-----------|
-| **Null Safety** | Chained calls, Optional.get(), returning null |
-| **Exceptions** | Empty catch, broad catch, lost stack trace |
-| **Resources** | Manual close(), missing try-with-resources |
-| **API Design** | Wrong HTTP verb, no versioning, entity exposure |
-| **Transactions** | Multi-step writes without @Transactional |
-| **Performance** | N+1 queries, loading all data, missing indexes |
-| **Clean Code** | Code duplication, magic numbers, unclear names |
+| Category         | Red Flags                                       |
+|------------------|-------------------------------------------------|
+| **Null Safety**  | Chained calls, Optional.get(), returning null   |
+| **Exceptions**   | Empty catch, broad catch, lost stack trace      |
+| **Resources**    | Manual close(), missing try-with-resources      |
+| **API Design**   | Wrong HTTP verb, no versioning, entity exposure |
+| **Transactions** | Multi-step writes without @Transactional        |
+| **Performance**  | N+1 queries, loading all data, missing indexes  |
+| **Clean Code**   | Code duplication, magic numbers, unclear names  |
 
 ---
 
