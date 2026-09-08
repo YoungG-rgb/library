@@ -21,6 +21,7 @@ metadata:
 | Spring Data репозитории                                  | `.claude/standards/spring-data-repository.md` |
 | Сервисы и `@Transactional`                               | `.claude/standards/service-transactional.md`  |
 | Шедулеры (`@Scheduled`, virtual threads, claim+dispatch) | `.claude/standards/scheduler.md`              |
+| Конфигурация (`application.yml`, профили, секреты)        | `.claude/standards/application-config.md`     |
 
 Типичные расхождения generic-примеров ниже со стандартами проекта (если стандарты есть — следуй им):
 - **JPA `@Id`**: `GenerationType.SEQUENCE` с именованной `<table>_seq`, **не** `IDENTITY`. `UUID` — только если ID нужен до flush или для распределённой записи.

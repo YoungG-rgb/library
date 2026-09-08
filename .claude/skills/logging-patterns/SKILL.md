@@ -130,7 +130,7 @@ AI can then:
 # application.yml (default - JSON for AI/prod)
 spring:
   application:
-    log.profile: ${SPRING_APPLICATION_LOG_PROFILE:local}
+    environment: ${SPRING_APPLICATION_ENVIRONMENT:local}
     name: ${SPRING_APPLICATION_NAME:application_name}
 ```
 
@@ -168,7 +168,7 @@ spring:
 <configuration>
   <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
   <springProperty scope="context" name="service-name" source="spring.application.name"/>
-  <springProperty scope="context" name="env" source="spring.application.log.profile" defaultValue="local"/>
+  <springProperty scope="context" name="env" source="spring.application.environment" defaultValue="local"/>
   <property name="LOG_PATTERN"
             value="%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) %cyan([${service-name}]) %green([%logger{1}]) %yellow([%X{X-B3-TraceId}]) %magenta([%thread]) %green([%logger{1}]) - %msg%n"/>
 

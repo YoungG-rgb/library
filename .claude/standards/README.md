@@ -15,6 +15,7 @@
 - [spring-data-repository.md](spring-data-repository.md) — Spring Data JPA-репозитории.
 - [service-transactional.md](service-transactional.md) — сервисы и транзакционные границы.
 - [scheduler.md](scheduler.md) — `@Scheduled`, выбор executor-а (virtual threads / пул).
+- [application-config.md](application-config.md) — `application.yml`: структура по концернам, плейсхолдеры, секреты без дефолта.
 
 ## Правила ведения
 
