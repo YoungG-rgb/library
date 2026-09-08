@@ -235,15 +235,15 @@ src/main/java/pl/piomin/services/
 
 ## Common Annotations
 
-| Annotation | Purpose |
-|------------|---------|
-| `@RestController` | REST controller (combines @Controller + @ResponseBody) |
-| `@Service` | Business logic component |
-| `@Repository` | Data access component |
-| `@Transactional` | Transaction management |
-| `@Valid` | Trigger validation |
-| `@ConfigurationProperties` | Bind properties to class |
-| `@EnableMethodSecurity` | Enable method security |
+| Annotation                 | Purpose                                                |
+|----------------------------|--------------------------------------------------------|
+| `@RestController`          | REST controller (combines @Controller + @ResponseBody) |
+| `@Service`                 | Business logic component                               |
+| `@Repository`              | Data access component                                  |
+| `@Transactional`           | Transaction management                                 |
+| `@Valid`                   | Trigger validation                                     |
+| `@ConfigurationProperties` | Bind properties to class                               |
+| `@EnableMethodSecurity`    | Enable method security                                 |
 
 ## Reactive WebFlux Endpoint
 

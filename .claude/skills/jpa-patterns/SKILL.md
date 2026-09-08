@@ -232,9 +232,190 @@ Optional<Order> findByIdWithItems(@Param("id") Long id);
 @Service
 public class OrderService {
 
-    @Transactional(readOnly = true)
     public OrderDTO getOrderWithItems(Long id) {
         Order order = orderRepository.findById(id).orElseThrow();
-        // Access within transaction
+        // Access within transaction — lazy collection initialized here
         int itemCount = order.getItems().size();
+        return OrderDTO.from(order, itemCount);
+    }
+}
 ```
+
+**Solution 3: Explicit fetch by FK (aggregate split) — preferred for read paths**
+
+Не навигируй по lazy-коллекции вообще. Фетчим `Order` сам по себе, а `items`
+грузим отдельным явным запросом по `orderId` — только когда они реально нужны.
+
+```java
+// ✅ Fetch Order alone; load items separately, on demand
+public OrderDTO getOrder(Long id) {
+    Order order = orderRepository.findById(id).orElseThrow();
+    List<OrderItem> items = orderItemRepository.findByOrderId(id);
+    return OrderDTO.from(order, items);
+}
+```
+
+⚠️ **Для СПИСКА заказов это снова N+1**, если звать `findByOrderId` в цикле.
+Используй один `...In(...)`-запрос и группируй в памяти:
+
+```java
+// ✅ One query for all items, then group by orderId
+List<Long> orderIds = orders.stream().map(Order::getId).toList();
+Map<Long, List<OrderItem>> itemsByOrder = orderItemRepository.findByOrderIdIn(orderIds)
+    .stream()
+    .collect(Collectors.groupingBy(OrderItem::getOrderId));
+```
+
+> **Важно:** это про *чтение*. `@OneToMany` на сущности всё ещё нужен, если
+> у тебя каскадное сохранение / orphan removal — для записи связь остаётся.
+
+### When to use what
+
+| Ситуация                                        | Решение                          |
+|-------------------------------------------------|----------------------------------|
+| items нужны почти всегда, один Order / страница | **JOIN FETCH** (один round-trip) |
+| items нужны иногда, разные пути чтения          | **Explicit fetch by FK** (Sol. 3)|
+| Список Order'ов + их items                      | **`findByOrderIdIn(...)`** — никогда `findByOrderId` в цикле |
+| Нужна навигация по графу внутри одной операции  | **@Transactional(readOnly)** (Sol. 2) |
+
+---
+
+## Projections & Pagination
+
+> Не тащи всю сущность, если нужно 3 поля. Не грузи всю таблицу, если нужна страница.
+
+### DTO Projections (read-only)
+
+```java
+// ❌ Fetch full entity graph just to render a list row
+List<Order> orders = orderRepository.findAll();
+
+// ✅ Interface projection — Hibernate selects only these columns
+public interface OrderSummary {
+    Long getId();
+    String getStatus();
+    BigDecimal getTotal();
+}
+
+public interface OrderRepository extends JpaRepository<Order, Long> {
+    List<OrderSummary> findByStatus(String status);
+}
+
+// ✅ Constructor (DTO) projection via JPQL — explicit and refactor-safe
+@Query("""
+       SELECT new com.example.order.dto.OrderSummaryDto(o.id, o.status, o.total)
+       FROM Order o
+       WHERE o.status = :status
+       """)
+List<OrderSummaryDto> findSummaries(@Param("status") String status);
+```
+
+Плюс проекций: не грузится весь граф, нет dirty-checking (это read-only данные,
+не managed-сущности), меньше памяти и трафика к БД.
+
+### Pagination
+
+```java
+// ❌ Может вернуть миллионы строк
+List<Order> all = orderRepository.findAll();
+
+// ✅ Страница
+Page<Order> page = orderRepository.findAll(PageRequest.of(0, 20, Sort.by("id")));
+Slice<Order> slice = orderRepository.findByStatus("NEW", PageRequest.of(0, 20));
+```
+
+⚠️ **`Pageable` + `JOIN FETCH` коллекции = пагинация в памяти.** Hibernate
+подтянет ВСЁ и порежет страницу в Java (в логах — `HHH000104: firstResult/maxResults
+specified with collection fetch; applying in memory`). Для страницы с коллекцией:
+пагинируй по корню (id), затем добери коллекции отдельным `...In(...)`-запросом
+(см. Solution 3 выше), либо используй `@EntityGraph` с `@ManyToOne`, а не `@OneToMany`.
+
+---
+
+## Read-only Transactions & Dirty Checking
+
+Для read-путей всегда `@Transactional(readOnly = true)`:
+
+```java
+// ✅ readOnly = true
+@Transactional(readOnly = true)
+public List<OrderSummaryDto> listNew() {
+    return orderRepository.findSummaries("NEW");
+}
+```
+
+Что это даёт:
+- **Нет dirty-checking snapshot'ов** — Hibernate не хранит копию каждой сущности
+  для сравнения на flush → меньше памяти и CPU на больших выборках.
+- **`FlushMode.MANUAL`** — не будет случайного `UPDATE` при чтении.
+- Подсказка драйверу/реплике, что транзакция только читает (роутинг на read-replica).
+
+```java
+// ❌ Молчаливый UPDATE: изменил managed-сущность в read-методе без readOnly
+public Order getOrder(Long id) {
+    Order o = orderRepository.findById(id).orElseThrow();
+    o.setViewedAt(LocalDateTime.now()); // dirty checking → UPDATE на flush!
+    return o;
+}
+```
+
+---
+
+## Optimistic Locking (Lost Updates)
+
+Два потока читают заказ, оба меняют, второй затирает первого — **lost update**.
+Защита — `@Version`:
+
+```java
+// ✅ Version column
+@Entity
+@Table(name = "orders")
+public class Order {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "orders_seq")
+    @SequenceGenerator(name = "orders_seq", sequenceName = "orders_seq", allocationSize = 1)
+    private Long id;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private Long version;
+}
+```
+
+Hibernate добавит `... WHERE id = ? AND version = ?` и бросит
+`OptimisticLockException` / `ObjectOptimisticLockingFailureException`, если версия
+уже сменилась. Обработай на границе — верни `409 Conflict` и дай клиенту повторить.
+
+```java
+// ✅ Retry на конфликте версий
+@Retryable(retryFor = ObjectOptimisticLockingFailureException.class,
+           maxAttempts = 3, backoff = @Backoff(delay = 50))
+@Transactional
+public void applyDiscount(Long id, BigDecimal pct) { ... }
+```
+
+### Optimistic vs Pessimistic
+
+| | Optimistic (`@Version`) | Pessimistic (`FOR UPDATE`) |
+|---|---|---|
+| Когда | Конфликты редки | Конфликты частые / деньги / claim |
+| Стоимость | Дёшево, без блокировок в БД | Держит row-lock всю транзакцию |
+| Провал | Исключение на commit → retry | Ждёт лок / таймаут |
+
+> **Для шедулеров и денежных claim'ов** проект использует pessimistic-путь
+> (`FOR UPDATE SKIP LOCKED` + idempotency-key) — см. блок «Project Standards
+> Override» и `.claude/standards/scheduler.md`.
+
+---
+
+## Quick Checklist перед PR
+
+- [ ] Нет навигации по lazy-коллекции вне транзакции (или сознательный Solution 1/2/3)
+- [ ] Нет `findByX` в цикле по списку — только `...In(...)` + группировка
+- [ ] Read-методы помечены `@Transactional(readOnly = true)`
+- [ ] Списки отдаются проекцией/DTO, а не полной сущностью
+- [ ] Выборки, способные вырасти, — через `Pageable`
+- [ ] Нет `Pageable` + `JOIN FETCH` коллекции (пагинация в памяти)
+- [ ] Конкурентно изменяемые сущности имеют `@Version`
+- [ ] `OptimisticLockException` обработан (409 / retry)

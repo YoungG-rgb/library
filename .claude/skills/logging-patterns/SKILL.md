@@ -52,12 +52,12 @@ Effective logging for Java applications with focus on structured, AI-parsable fo
 {"timestamp":"2026-01-29T10:15:30Z","level":"INFO","orderId":12345,"userId":"user-789","total":99.99}
 ```
 
-| Aspect | Text | JSON |
-|--------|------|------|
-| Parsing | Regex/interpretation | Direct field access |
-| Token usage | Higher (repeated patterns) | Lower (structured) |
-| Error extraction | Parse stack trace text | `exception` field |
-| Filtering | grep patterns | `jq` queries |
+| Aspect           | Text                       | JSON                |
+|------------------|----------------------------|---------------------|
+| Parsing          | Regex/interpretation       | Direct field access |
+| Token usage      | Higher (repeated patterns) | Lower (structured)  |
+| Error extraction | Parse stack trace text     | `exception` field   |
+| Filtering        | grep patterns              | `jq` queries        |
 
 ### Recommended Setup for AI-Assisted Development
 
@@ -124,47 +124,14 @@ AI can then:
 
 ## Quick Setup (Spring Boot 3.4+)
 
-### Native Structured Logging
-
-Spring Boot 3.4+ has built-in support - no extra dependencies!
-
-```yaml
-# application.yml
-logging:
-  structured:
-    format:
-      console: logstash    # or "ecs" for Elastic Common Schema
-
-# Supported formats: logstash, ecs, gelf
-```
-
 ### Profile-Based Switching
 
 ```yaml
 # application.yml (default - JSON for AI/prod)
 spring:
-  profiles:
-    default: json-logs
-
----
-spring:
-  config:
-    activate:
-      on-profile: json-logs
-logging:
-  structured:
-    format:
-      console: logstash
-
----
-spring:
-  config:
-    activate:
-      on-profile: human-logs
-# No structured format = human-readable default
-logging:
-  pattern:
-    console: "%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
+  application:
+    log.profile: ${SPRING_APPLICATION_LOG_PROFILE:local}
+    name: ${SPRING_APPLICATION_NAME:application_name}
 ```
 
 **Usage:**
@@ -189,38 +156,47 @@ logging:
     <artifactId>logstash-logback-encoder</artifactId>
     <version>7.4</version>
 </dependency>
+<dependency>
+    <groupId>org.codehaus.janino</groupId>
+    <artifactId>janino</artifactId>
+</dependency>
 ```
 
 **logback-spring.xml:**
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+  <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+  <springProperty scope="context" name="service-name" source="spring.application.name"/>
+  <springProperty scope="context" name="env" source="spring.application.log.profile" defaultValue="local"/>
+  <property name="LOG_PATTERN"
+            value="%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) %cyan([${service-name}]) %green([%logger{1}]) %yellow([%X{X-B3-TraceId}]) %magenta([%thread]) %green([%logger{1}]) - %msg%n"/>
 
-    <!-- JSON (default) -->
-    <springProfile name="!human-logs">
-        <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
-            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-                <includeMdcKeyName>requestId</includeMdcKeyName>
-                <includeMdcKeyName>userId</includeMdcKeyName>
-            </encoder>
-        </appender>
-        <root level="INFO">
-            <appender-ref ref="JSON"/>
-        </root>
-    </springProfile>
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>${LOG_PATTERN}</pattern>
+    </encoder>
+  </appender>
 
-    <!-- Human-readable (optional) -->
-    <springProfile name="human-logs">
-        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-            <encoder>
-                <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
-            </encoder>
-        </appender>
-        <root level="INFO">
-            <appender-ref ref="CONSOLE"/>
-        </root>
-    </springProfile>
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+  </root>
 
+  <if condition='property("env").equalsIgnoreCase("test") || property("env").equalsIgnoreCase("prod")'>
+    <then>
+      <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
+        <destination>172.27.212.35:5080</destination>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+          <includeMdcKeyName>X-B3-TraceId</includeMdcKeyName>
+          <customFields>{"application":"service-name"}</customFields>
+        </encoder>
+        <keepAliveDuration>5 minutes</keepAliveDuration>
+      </appender>
+      <root level="INFO">
+        <appender-ref ref="LOGSTASH"/>
+      </root>
+    </then>
+  </if>
 </configuration>
 ```
 
@@ -248,15 +224,10 @@ log.info("Order created",
 ### Logger Declaration
 
 ```java
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+@Slf4j
 @Service
-public class OrderService {
-    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
-
-    // use `log` directly for logging
-}
+public class OrderService { }
 ```
 
 ### Parameterized Logging

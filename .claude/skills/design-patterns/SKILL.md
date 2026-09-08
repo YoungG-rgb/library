@@ -49,20 +49,34 @@ Quick reference for common design patterns in Java.
 ```java
 // ✅ Builder pattern
 @Data
-@Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@Accessors(chain = true)
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class User {
-    String name;  // required
-    String email; // required
-    int age;      // optional
+static class DatasourceProperties {
+  String poolName;    // optional
+  String url;         // required
+
+  @ToString.Exclude
+  String password;    // required
+
+  Map<String, Object> additionalProperties = new HashMap<>();
+
+  public String getPoolNameOrDefault() {
+    return this.poolName == null ? ("HikariPool-" + UUID.randomUUID()) : this.poolName;
+  }
+
+  public void addAdditionalData(String key, Object val) {
+    this.additionalProperties.put(key, val);
+  }
 }
 
 // Usage
-User user = User.builder("John", "john@example.com")
-    .age(30)
-    .build();
+DatasourceProperties properties = new DatasourceProperties()
+        .setUrl("dabaseUrl")
+        .setPassword("password")
+        .setPoolName("Hikari-poolName")
+        .addAdditionalData("key", 1);
 ```
 
 ### Factory
