@@ -156,7 +156,7 @@ spring:
   <if condition='property("env").equalsIgnoreCase("test") || property("env").equalsIgnoreCase("prod")'>
     <then>
       <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
-        <destination>172.27.212.35:5080</destination>
+        <destination>${LOGSTASH_HOST:-localhost}:${LOGSTASH_PORT:-5000}</destination>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
           <includeMdcKeyName>X-B3-TraceId</includeMdcKeyName>
           <customFields>{"application":"service-name"}</customFields>

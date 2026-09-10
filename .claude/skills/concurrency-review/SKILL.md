@@ -3,6 +3,25 @@ name: concurrency-review
 description: Review Java concurrency code for thread safety, race conditions, deadlocks, and modern patterns (Virtual Threads, CompletableFuture, @Async). Use when user asks "check thread safety", "concurrency review", "async code review", or when reviewing multi-threaded code.
 ---
 
+## ⚠️ Project Standards Override
+
+Если в проекте есть `.claude/standards/` — эти файлы главнее generic-примеров ниже при конфликте. Особенно для конкурентности:
+
+| Тема                                                    | Файл                                         |
+|---------------------------------------------------------|----------------------------------------------|
+| Шедулеры, executor'ы, virtual threads, claim+dispatch   | `.claude/standards/scheduler.md`             |
+| Сервисы и `@Transactional` (self-invocation, границы)   | `.claude/standards/service-transactional.md` |
+
+Жёсткие правила (всегда):
+- **DI — только конструкторная** (`@RequiredArgsConstructor` + `private final`). Field `@Autowired` — флаг ревьюера, кроме prototype-scoped Task (см. `scheduler.md`). Примеры ниже с `@Autowired` на поле — упрощение ради краткости, в проекте так не пишем.
+- **MDC не наследуется** виртуальными потоками / `@Async` / `@Scheduled`-Task. Ставь MDC внутри `Task.run()`, снимай в `finally`. Детали — скилл `logging-patterns` и `.claude/standards/correlation-and-tracing.md`.
+- **Catch `Exception` в `Runnable.run()`** виртуального потока — обязательно, иначе поток умрёт молча (см. `scheduler.md`).
+- **Идемпотентность** side-effect'ов при параллельной обработке — UNIQUE-индекс / стабильный idempotency-key.
+
+Если `.claude/standards/` отсутствует — generic-контент ниже как fallback.
+
+---
+
 # Concurrency Review Skill
 
 Review Java concurrent code for correctness, safety, and modern best practices.
@@ -45,9 +64,9 @@ try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
 
 **Rule of thumb**: If your app never has 10,000+ concurrent tasks, virtual threads may not provide significant benefit.
 
-### Java 25: Synchronized Pinning Fixed
+### Java 24: Synchronized Pinning Fixed
 
-In Java 21-23, virtual threads became "pinned" when entering `synchronized` blocks with blocking operations. **Java 25 fixes this** (JEP 491).
+In Java 21-23, virtual threads became "pinned" when entering `synchronized` blocks with blocking operations. **Java 24 fixes this** (JEP 491 — delivered in JDK 24).
 
 ```java
 // In Java 21-23: ⚠️ Could cause pinning
@@ -55,7 +74,7 @@ synchronized (lock) {
     blockingIoCall();  // Virtual thread pinned to carrier
 }
 
-// In Java 25: ✅ No longer an issue
+// In Java 24+: ✅ No longer an issue
 // But consider ReentrantLock for explicit control anyway
 ```
 
@@ -74,16 +93,19 @@ ScopedValue.where(CURRENT_USER, user).run(() -> {
 });
 ```
 
-### Structured Concurrency (Java 25 Preview)
+### Structured Concurrency (Java 25 Preview — JEP 505)
+
+> ⚠️ API переработан в JDK 25: конструкторы заменены на статические фабрики
+> `StructuredTaskScope.open(...)`; `ShutdownOnFailure` / `throwIfFailed()` убраны.
+> Zero-arg `open()` = «ждать все, упасть при первом сбое» (бывший ShutdownOnFailure).
 
 ```java
-// ✅ Structured concurrency - tasks tied to scope lifecycle
-try (StructuredTaskScope.ShutdownOnFailure scope = new StructuredTaskScope.ShutdownOnFailure()) {
-    Subtask<User> userTask = scope.fork(() -> fetchUser(id));
-    Subtask<Orders> ordersTask = scope.fork(() -> fetchOrders(id));
+// ✅ Structured concurrency - tasks tied to scope lifecycle (JDK 25 API)
+try (var scope = StructuredTaskScope.open()) {          // ждёт всех / падает при сбое
+    StructuredTaskScope.Subtask<User> userTask = scope.fork(() -> fetchUser(id));
+    StructuredTaskScope.Subtask<Orders> ordersTask = scope.fork(() -> fetchOrders(id));
 
-    scope.join();            // Wait for all
-    scope.throwIfFailed();   // Propagate exceptions
+    scope.join();   // ждёт завершения; бросает при сбое любого сабтаска
 
     return new Profile(userTask.get(), ordersTask.get());
 }

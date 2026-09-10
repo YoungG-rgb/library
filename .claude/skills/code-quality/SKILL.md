@@ -26,6 +26,17 @@ description: Comprehensive code review for Java - clean code principles, API con
 
 Прочитай `CLAUDE.md` проекта на предмет проектных запретов (PII, изменения внешних систем и т.п.) до начала ревью.
 
+### Смежные скиллы — за глубиной делегируй
+
+Разделы ниже (Performance/N+1, Transactions) дают лишь чек-лист для ревью. За полными паттернами и фиксами иди в специализированный скилл, чтобы не было расхождений:
+
+| Область при ревью | Куда за глубиной |
+|---|---|
+| JPA: N+1, lazy, JOIN FETCH, projections, locking | скилл `jpa-patterns` + `jpa-entity.md` / `spring-data-repository.md` |
+| Транзакции, `@Transactional`, self-invocation | `service-transactional.md` |
+| Async, потоки, `@Async`, virtual threads | скилл `concurrency-review` + `scheduler.md` |
+| Логи, MDC, PII-маскирование, корреляция | скилл `logging-patterns` + `correlation-and-tracing.md` |
+
 ---
 
 # Code Quality Review Skill
@@ -255,6 +266,8 @@ try (FileInputStream fis = new FileInputStream(file)) {
 
 ### Transaction Boundaries
 
+> Границы `@Transactional`, propagation, self-invocation — глубже в `service-transactional.md`.
+
 **Check for:**
 ```java
 // ❌ Missing transaction
@@ -292,6 +305,8 @@ public void doStuff(Long id) { }
 ```
 
 ### Performance
+
+> N+1, JOIN FETCH, projections, пагинация, locking — полный разбор в скилле `jpa-patterns`.
 
 **Check for:**
 ```java

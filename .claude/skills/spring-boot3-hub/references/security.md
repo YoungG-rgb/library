@@ -212,12 +212,9 @@ public class JwtService {
 
 ```java
 @Service
+@RequiredArgsConstructor
 public class CustomUserDetailsService implements UserDetailsService {
     private final UserRepository userRepository;
-
-    public CustomUserDetailsService(UserRepository userRepository) {
-        this.userRepository = userRepository;
-    }
 
     @Override
     @Transactional(readOnly = true)
@@ -247,12 +244,9 @@ public class CustomUserDetailsService implements UserDetailsService {
 ```java
 @RestController
 @RequestMapping("/api/auth")
+@RequiredArgsConstructor
 public class AuthenticationController {
     private final AuthenticationService authenticationService;
-
-    public AuthenticationController(AuthenticationService authenticationService) {
-        this.authenticationService = authenticationService;
-    }
 
     @PostMapping("/register")
     public ResponseEntity<AuthenticationResponse> register(
@@ -289,21 +283,12 @@ public class AuthenticationController {
 ```java
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class AuthenticationService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
-
-    public AuthenticationService(UserRepository userRepository,
-                                  PasswordEncoder passwordEncoder,
-                                  JwtService jwtService,
-                                  AuthenticationManager authenticationManager) {
-        this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
-        this.jwtService = jwtService;
-        this.authenticationManager = authenticationManager;
-    }
 
     public AuthenticationResponse register(RegisterRequest request) {
         if (userRepository.existsByEmail(request.email())) {
@@ -455,15 +440,15 @@ public class OAuth2ResourceServerConfig {
 
 ## Quick Reference
 
-| Annotation | Purpose |
-|------------|---------|
-| `@EnableWebSecurity` | Enables Spring Security |
-| `@EnableMethodSecurity` | Enables method-level security annotations |
-| `@PreAuthorize` | Checks authorization before method execution |
-| `@PostAuthorize` | Checks authorization after method execution |
-| `@Secured` | Role-based method security |
-| `@WithMockUser` | Mock authenticated user in tests |
-| `@AuthenticationPrincipal` | Inject current user in controller |
+| Annotation                 | Purpose                                      |
+|----------------------------|----------------------------------------------|
+| `@EnableWebSecurity`       | Enables Spring Security                      |
+| `@EnableMethodSecurity`    | Enables method-level security annotations    |
+| `@PreAuthorize`            | Checks authorization before method execution |
+| `@PostAuthorize`           | Checks authorization after method execution  |
+| `@Secured`                 | Role-based method security                   |
+| `@WithMockUser`            | Mock authenticated user in tests             |
+| `@AuthenticationPrincipal` | Inject current user in controller            |
 
 ## Security Best Practices
 

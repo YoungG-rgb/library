@@ -73,7 +73,7 @@ static class DatasourceProperties {
 
 // Usage
 DatasourceProperties properties = new DatasourceProperties()
-        .setUrl("dabaseUrl")
+        .setUrl("databaseUrl")
         .setPassword("password")
         .setPoolName("Hikari-poolName")
         .addAdditionalData("key", 1);
@@ -83,11 +83,12 @@ DatasourceProperties properties = new DatasourceProperties()
 **Problem:** Create objects without knowing exact class upfront
 
 ```java
-// ✅ Factory pattern
 public interface Notification {
     void send(String message);
 }
 
+// ❌ Статическая фабрика — избегаем: жёсткая связка, не тестируется, нет DI,
+//    добавление типа = правка switch. Приемлема только вне Spring-контекста.
 public class NotificationFactory {
     public static Notification create(String type) {
         return switch (type.toUpperCase()) {
@@ -99,12 +100,13 @@ public class NotificationFactory {
     }
 }
 
-// Spring version - preferred
+// ✅ Spring-фабрика — предпочтительно: мапа бинов по типу, новый тип = новый @Component,
+//    без правки фабрики (см. service-transactional.md, раздел typed-handler registry).
 @Component
-public class NotificationFactory {
+public class NotificationSenderFactory {
     private final Map<String, NotificationSender> senders;
 
-    public NotificationFactory(List<NotificationSender> senderList) {
+    public NotificationSenderFactory(List<NotificationSender> senderList) {
         this.senders = senderList.stream()
             .collect(Collectors.toMap(
                 NotificationSender::getType,
@@ -127,7 +129,8 @@ public class NotificationFactory {
 **Problem:** Multiple algorithms for same operation, choose at runtime
 
 ```java
-// ✅ Strategy pattern
+// ✅ Strategy pattern (SAM-интерфейс — годится и для лямбд)
+@FunctionalInterface
 public interface PaymentStrategy {
     void pay(BigDecimal amount);
 }
@@ -157,12 +160,8 @@ public class ShoppingCart {
 cart.setPaymentStrategy(new CreditCardPayment("4111..."));
 cart.checkout(new BigDecimal("99.99"));
 
-// Functional variant (Java 8+)
-@FunctionalInterface
-public interface PaymentStrategy {
-    void pay(BigDecimal amount);
-}
-
+// Functional variant (Java 8+): PaymentStrategy уже SAM — передавай лямбду,
+// не переобъявляй интерфейс.
 PaymentStrategy creditCard = amount -> System.out.println("Card: " + amount);
 cart.setPaymentStrategy(creditCard);
 ```
