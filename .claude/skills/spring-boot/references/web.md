@@ -277,6 +277,35 @@ public class UniqueEmailValidator implements ConstraintValidator<UniqueEmail, St
 
 ## WebClient for External APIs (Configuration components)
 
+> Проброс `X-Request-Id` / correlation / трейсинга через WebClient-фильтры и
+> Context↔MDC-мост — см. стандарт [`correlation-and-tracing.md`](../../../standards/correlation-and-tracing.md).
+
+### CorrelationHeader (единый источник правды)
+
+Один enum управляет всеми тремя звеньями: ingress (создание), MDC (логи), egress
+(проброс). Добавить новый сквозной заголовок = одна строка. `traceparent` сюда НЕ
+добавляй — трейсинг ведёт `micrometer-tracing`.
+
+```java
+@Getter
+@RequiredArgsConstructor
+public enum CorrelationHeader {
+    //           header              generate  echo   propagate  toMdc
+    REQUEST_ID  ("X-Request-Id",     true,     true,  true,      true),
+    CORRELATION ("X-Correlation-Id", true,     true,  true,      true),
+    TENANT_ID   ("X-Tenant-Id",      false,    false, true,      true);
+
+    /** Общий валидатор: safe-charset + лимит длины (защита от мусора / high-cardinality). */
+    public static final Pattern SAFE_ID = Pattern.compile("^[A-Za-z0-9._-]{1,64}$");
+
+    private final String header;
+    private final boolean generateIfAbsent;   // request/correlation — да; tenant/user — нет
+    private final boolean echoToResponse;     // вернуть клиенту в заголовке ответа
+    private final boolean propagateDownstream;// уходит в исходящий WebClient-запрос
+    private final boolean toMdc;              // попадает в MDC → в логи
+}
+```
+
 ### ReactorHooksConfiguration
 ```java
 @Slf4j
@@ -291,7 +320,10 @@ public class ReactorHooksConfiguration {
     }
 
     public void contextPropagation(){
-        ContextRegistry.getInstance().registerThreadLocalAccessor(new RequestIdMdcAccessor());
+        Arrays.stream(CorrelationHeader.values())
+                .filter(CorrelationHeader::isToMdc)
+                .forEach(h -> ContextRegistry.getInstance()
+                        .registerThreadLocalAccessor(new HeaderMdcAccessor(h.getHeader())));
         Hooks.enableAutomaticContextPropagation();
     }
 
@@ -319,57 +351,80 @@ public class ReactorHooksConfiguration {
         return false;
     }
 
-    public static class RequestIdMdcAccessor implements ThreadLocalAccessor<String> {
+    @RequiredArgsConstructor
+    public static class HeaderMdcAccessor implements ThreadLocalAccessor<String> {
+        private final String key;
         @NotNull
-        @Override public Object key()            { return RequestIdWebFilter.X_REQUEST_ID; }
-        @Override public String getValue()       { return MDC.get(RequestIdWebFilter.X_REQUEST_ID); }
-        @Override public void setValue(String v) { MDC.put(RequestIdWebFilter.X_REQUEST_ID, v); }
-        @Override public void setValue()         { MDC.remove(RequestIdWebFilter.X_REQUEST_ID); }
+        @Override public Object key()            { return key; }
+        @Override public String getValue()       { return MDC.get(key); }
+        @Override public void setValue(String v) { MDC.put(key, v); }
+        @Override public void setValue()         { MDC.remove(key); }
     }
 }
 ```
 
-### RequestIdWebFilter
+### CorrelationWebFilter (ingress)
+
+Дескриптор-driven: идём по `CorrelationHeader`, у каждого свои правила
+(генерить/эхо). `X-Request-Id`/`X-Correlation-Id` генерятся при отсутствии,
+`X-Tenant-Id` — нет (его нельзя выдумать).
+
 ```java
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
-public class RequestIdWebFilter implements WebFilter {
-
-    public static final String X_REQUEST_ID = "X-Request-Id";
-    private static final Pattern UUID_RE = Pattern.compile(
-        "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
+public class CorrelationWebFilter implements WebFilter {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
-        String incoming = exchange.getRequest().getHeaders().getFirst(X_REQUEST_ID);
-        // недоверенный вход: принимаем только валидный UUID, иначе генерим свой
-        String id = (incoming != null && UUID_RE.matcher(incoming).matches())
-                ? incoming
-                : UUID.randomUUID().toString();
+        HttpHeaders in = exchange.getRequest().getHeaders();
+        Map<String, String> resolved = new LinkedHashMap<>();
 
-        exchange.getResponse().getHeaders().set(X_REQUEST_ID, id);
+        for (CorrelationHeader h : CorrelationHeader.values()) {
+            String incoming = in.getFirst(h.getHeader());
+            String value;
+            if (incoming != null && CorrelationHeader.SAFE_ID.matcher(incoming).matches()) {
+                value = incoming;                        // пришёл валидный — берём как есть
+            } else if (h.isGenerateIfAbsent()) {
+                value = UUID.randomUUID().toString();    // request/correlation — генерим
+            } else {
+                continue;                                // tenant/user — нет и не выдумываем
+            }
+            resolved.put(h.getHeader(), value);
+            if (h.isEchoToResponse()) {
+                exchange.getResponse().getHeaders().set(h.getHeader(), value);
+            }
+        }
 
         return chain.filter(exchange)
-                .contextWrite(ctx -> ctx.put(X_REQUEST_ID, id));
+                .contextWrite(ctx -> ctx.putAllMap(resolved)); // reactor-core 3.4+
     }
 }
 ```
 
-### RequestIdPropagationFilter
+### ContextHeadersPropagationFilter
+
+Один фильтр с белым списком сквозных ключей — не плодим по фильтру на заголовок.
+Добавление нового ключа = одна строка в `PROPAGATED`. `traceparent` сюда НЕ кладём —
+его проставляет `micrometer-tracing` сам (см. `correlation-and-tracing.md`).
+
 ```java
 @Component
-@RequiredArgsConstructor
-public class RequestIdPropagationFilter implements ExchangeFilterFunction {
+public class ContextHeadersPropagationFilter implements ExchangeFilterFunction {
+
+    // из enum берём только заголовки с флагом propagateDownstream
+    private static final List<String> PROPAGATED = Arrays.stream(CorrelationHeader.values())
+            .filter(CorrelationHeader::isPropagateDownstream)
+            .map(CorrelationHeader::getHeader)
+            .toList();
 
     @Override
     public Mono<ClientResponse> filter(ClientRequest request, ExchangeFunction next) {
         return Mono.deferContextual(ctx -> {
-            ClientRequest mutated = ctx.getOrEmpty(RequestIdWebFilter.X_REQUEST_ID)
-                .map(id -> ClientRequest.from(request)
-                    .header(RequestIdWebFilter.X_REQUEST_ID, id.toString())
-                    .build())
-                .orElse(request);
-            return next.exchange(mutated);
+            ClientRequest.Builder mutated = ClientRequest.from(request);
+            for (String key : PROPAGATED) {
+                ctx.getOrEmpty(key).ifPresent(v -> mutated.header(key, v.toString()));
+            }
+            return next.exchange(mutated.build());
         });
     }
 }
@@ -380,21 +435,29 @@ public class RequestIdPropagationFilter implements ExchangeFilterFunction {
 @Slf4j
 @Component
 public class WebClientLoggingFilter implements ExchangeFilterFunction {
-    public static final String X_REQUEST_ID = "X-Request-Id";
 
     @Override
     public Mono<ClientResponse> filter(ClientRequest request, ExchangeFunction next) {
         long startNanos = System.nanoTime();
         return next.exchange(request)
-                // deferContextual — читаем requestId из Reactor Context, НЕ из ThreadLocal MDC
+                // читаем requestId из Reactor Context, НЕ из ThreadLocal MDC
                 .doOnEach(signal -> {
+                    // логируем и успех (onNext, включая 4xx/5xx), и падения (onError: таймаут, обрыв, DNS)
+                    if (!signal.isOnNext() && !signal.isOnError()) {
+                        return;
+                    }
+                    long ms = (System.nanoTime() - startNanos) / 1_000_000;
+                    String requestId = signal.getContextView()
+                            .getOrDefault(CorrelationHeader.REQUEST_ID.getHeader(), "-");
+                    String target = UriUtils.normalizeUri(request.url().toString());
                     if (signal.isOnNext()) {
-                        String requestId = signal.getContextView().getOrDefault(X_REQUEST_ID, "-");
-                        long ms = (System.nanoTime() - startNanos) / 1_000_000;
                         log.info("[{}] {} {} -> {} ({} ms)",
-                                requestId, request.method(),
-                                UriUtils.normalizeUri(request.url().toString()),
+                                requestId, request.method(), target,
                                 signal.get().statusCode(), ms);
+                    } else {
+                        log.warn("[{}] {} {} -> FAILED: {} ({} ms)",
+                                requestId, request.method(), target,
+                                signal.getThrowable().toString(), ms);
                     }
                 })
                 .doFirst(() -> log.debug("→ {} {}", request.method(), UriUtils.normalizeUri(request.url().toString())));
@@ -590,7 +653,7 @@ public class WebClientConfiguration {
     private final ExternalConnectorsProperties externalConnectorsProperties;
     private final DownstreamTimeoutMetricsFilter downstreamTimeoutMetricsFilter;
     private final WebClientLoggingFilter webClientLoggingFilter;
-    private final RequestIdPropagationFilter requestIdPropagationFilter;
+    private final ContextHeadersPropagationFilter contextHeadersPropagationFilter;
 
     private ConnectionProvider customConnectionProvider(ExternalConnectorsProperties.ConnectorProperties properties) {
         ExternalConnectorsProperties.ConnectorProperties.Pool pool = properties.getPool();
@@ -620,8 +683,8 @@ public class WebClientConfiguration {
 
         properties.getDefaultHeaders().forEach(builder::defaultHeader);
         return builder
-                .filter(requestIdPropagationFilter)      // 1. добавляем X-Request-Id в исходящий запрос
-                .filter(webClientLoggingFilter)          // 2. логируем method/url/status/ms (видит проброшенный id)
+                .filter(contextHeadersPropagationFilter) // 1. пробрасываем сквозные заголовки (X-Request-Id и др.)
+                .filter(webClientLoggingFilter)          // 2. логируем method/url/status/ms (видит проброшенные заголовки)
                 .filter(downstreamTimeoutMetricsFilter)  // 3. ближе всего к сети — классифицирует тайм-ауты
                 .build();
     }

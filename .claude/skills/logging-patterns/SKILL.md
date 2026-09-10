@@ -5,7 +5,7 @@ description: Java logging best practices with SLF4J, structured logging (JSON), 
 
 ## ⚠️ Project Standards Override
 
-Если в проекте есть `.claude/standards/` — следуй им, особенно [`service-transactional.md`](.claude/standards/service-transactional.md) (раздел Логирование/MDC).
+Если в проекте есть `.claude/standards/` — следуй им, особенно [`service-transactional.md`](.claude/standards/service-transactional.md) (раздел Логирование/MDC) и [`correlation-and-tracing.md`](.claude/standards/correlation-and-tracing.md) (`X-Request-Id`, трейсинг, Context↔MDC-мост в реактивном коде, проброс к downstream).
 
 **Жёсткие правила логирования (всегда)**:
 
@@ -60,22 +60,6 @@ Effective logging for Java applications with focus on structured, AI-parsable fo
 | Filtering        | grep patterns              | `jq` queries        |
 
 ### Recommended Setup for AI-Assisted Development
-
-```yaml
-# application.yml - JSON by default
-logging:
-  structured:
-    format:
-      console: logstash  # Spring Boot 3.4+
-
-# When YOU need to read logs manually:
-# Option 1: Use jq
-# tail -f app.log | jq .
-
-# Option 2: Switch profile temporarily
-# java -jar app.jar --spring.profiles.active=human-logs
-```
-
 ### Log Format Optimized for AI Analysis
 
 ```json
@@ -94,7 +78,7 @@ logging:
 ```
 
 **Key fields for AI debugging:**
-- `requestId` - group all logs from same request
+- `X-Request-Id` - group all logs from same request
 - `step` - track progress through flow
 - `duration_ms` - identify slow operations
 - `level` - quick filter for errors
@@ -122,8 +106,6 @@ AI can then:
 
 ---
 
-## Quick Setup (Spring Boot 3.4+)
-
 ### Profile-Based Switching
 
 ```yaml
@@ -134,18 +116,7 @@ spring:
     name: ${SPRING_APPLICATION_NAME:application_name}
 ```
 
-**Usage:**
-```bash
-# Default: JSON (for AI, CI/CD, production)
-./mvnw spring-boot:run
-
-# Human-readable when needed
-./mvnw spring-boot:run -Dspring.profiles.active=human-logs
-```
-
 ---
-
-## Setup for Spring Boot < 3.4
 
 ### Logstash Logback Encoder
 

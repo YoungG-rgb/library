@@ -492,13 +492,13 @@ ENTRYPOINT ["java","-cp","app:app/lib/*","com.example.Application"]
 
 ## Quick Reference
 
-| Component | Purpose |
-|-----------|---------|
-| **Config Server** | Centralized configuration management |
-| **Eureka** | Service discovery and registration |
-| **Gateway** | API gateway with routing, filtering, load balancing |
-| **Circuit Breaker** | Fault tolerance and fallback patterns |
-| **Load Balancer** | Client-side load balancing |
-| **Tracing** | Distributed tracing across services |
-| **Actuator** | Production-ready monitoring and management |
-| **Kubernetes** | Container orchestration and deployment |
+| Component           | Purpose                                             |
+|---------------------|-----------------------------------------------------|
+| **Config Server**   | Centralized configuration management                |
+| **Eureka**          | Service discovery and registration                  |
+| **Gateway**         | API gateway with routing, filtering, load balancing |
+| **Circuit Breaker** | Fault tolerance and fallback patterns               |
+| **Load Balancer**   | Client-side load balancing                          |
+| **Tracing**         | Distributed tracing across services                 |
+| **Actuator**        | Production-ready monitoring and management          |
+| **Kubernetes**      | Container orchestration and deployment              |
