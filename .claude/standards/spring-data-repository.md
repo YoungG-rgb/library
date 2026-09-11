@@ -10,7 +10,7 @@
 
 ## Что должно жить в репозитории
 
-- Методы доступа к данным — derived-queries (`findByclientCodeAndStatus`), JPQL/SQL через `@Query`.
+- Методы доступа к данным — derived-queries (`findByClientCodeAndStatus`), JPQL/SQL через `@Query`.
 - Простые агрегаты (`existsBy...`, `countBy...`, `maxBy...`).
 
 **Не должно**: бизнес-логика, оркестрация, вызовы других сервисов/репозиториев, маппинг в DTO для REST. Это всё — в сервисном слое.
@@ -22,7 +22,7 @@
 Хороши для запросов из 1–3 предикатов:
 
 ```java
-Optional<OrderEntity> findByclientCodeAndStatus(UUID clientCode, OrderStatus status);
+Optional<OrderEntity> findByClientCodeAndStatus(UUID clientCode, OrderStatus status);
 ```
 
 Если имя метода становится длиннее ~60 символов или содержит 4+ предиката — переключайся на `@Query`.
@@ -86,7 +86,7 @@ int cancelPendingByGroupId(@Param("groupId") UUID groupId,
 
 - Время — `LocalDateTime`. Не `Instant`, не `Date`.
 - ID — `UUID` или `Long` в зависимости от сущности.
-- Enum в JPQL — пиши значение enum'а напрямую (`OrderStatus.NEW`) или передавай через `@Param`.
+- Enum в JPQL — **предпочитай `@Param`-биндинг** (как в `@Modifying`-примере выше) или полностью квалифицированное имя (FQCN). Короткое имя (`OutboxStatus.PENDING`) работает на Hibernate 6, но это Hibernate-специфичное поведение — не все JPA-провайдеры разбирают короткую форму. **Почему:** `@Param` переносим между провайдерами и рефактор-безопасен.
 
 ## Возвращаемые типы
 

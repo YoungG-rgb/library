@@ -17,7 +17,7 @@ description: JPA/Hibernate patterns and common pitfalls (N+1, lazy loading, tran
 - `@Id` — `GenerationType.SEQUENCE` с явной `@SequenceGenerator(name="<table>_seq", sequenceName="<table>_seq", allocationSize=1)`. **Не** `IDENTITY` (ломает Hibernate-батчинг).
 - Lombok: `@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Accessors(chain = true) @FieldDefaults(level = PRIVATE)`. **Никогда `@Data` / `@Builder` / `record`.**
 - `@Table(name = "...")` + `@Column(name = "snake_case")` всегда явно. Множественное число для таблиц.
-- Время — `LocalDateTime`, не `Instant`. `@CreationTimestamp` / `@UpdateTimestamp` для системных полей; `@PrePersist`-fallback для полей, приходящих извне (`occurredAt`, `receivedAt`).
+- Время — по семантике: `Instant`/`OffsetDateTime` для UTC-меток аудита (`createdAt`, `updatedAt`, машинные timestamp'ы), `LocalDateTime`/`ZonedDateTime` для бизнес-времени и DST-логики (см. `.claude/standards/jpa-entity.md`). `@CreationTimestamp` / `@UpdateTimestamp` для системных полей; `@PrePersist`-fallback для полей, приходящих извне (`occurredAt`, `receivedAt`).
 - Enum — `@Enumerated(EnumType.STRING)`. **Никогда `ORDINAL`.**
 - Деньги — `BigDecimal` с `precision`/`scale`. Никогда `double`/`float`.
 - `nullable = false` на все обязательные. `unique = true` на бизнес-ключи / `idempotency_key`.
@@ -99,13 +99,15 @@ for (Author author : authors) {
 // ✅ GOOD: Single query with JOIN FETCH
 public interface AuthorRepository extends JpaRepository<Author, Long> {
 
-    @Query("SELECT a FROM Author a JOIN FETCH a.books")
+    @Query("SELECT DISTINCT a FROM Author a JOIN FETCH a.books")
     List<Author> findAllWithBooks();
 }
 
 // Usage - single query
 List<Author> authors = authorRepository.findAllWithBooks();
 ```
+
+> ⚠️ `JOIN FETCH` по `@OneToMany` возвращает **декартово произведение** — один корень (`Author`) дублируется по числу его `books`. Убирай дубли корней через `SELECT DISTINCT` (Hibernate дедупит в памяти, на SQL `DISTINCT` не транслируется благодаря `hibernate.query.passDistinctThrough=false`) либо собирай в `Set`. Без этого `findAllWithBooks()` вернёт повторяющиеся `Author`.
 
 ### Solution 2: @EntityGraph
 

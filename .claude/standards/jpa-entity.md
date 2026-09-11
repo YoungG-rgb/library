@@ -27,7 +27,7 @@ public class OrderEntity {
 - `@Getter` / `@Setter` — Lombok, на класс. Не используй `@Data`: он добавляет `equals`/`hashCode`/`toString` по всем полям и ломает JPA-семантику identity.
 - `@NoArgsConstructor` обязателен — без него Hibernate не сможет инстанцировать.
 - `@AllArgsConstructor` — для удобной сборки в тестах и сервисах вместе с `@Accessors(chain = true)`.
-- `@Accessors(chain = true)` — сеттеры возвращают `this`, для fluent-сборки: `new OrderEntity().setclientCode(...).setAmount(...)`. **Не используем `@Builder`.**
+- `@Accessors(chain = true)` — сеттеры возвращают `this`, для fluent-сборки: `new OrderEntity().setClientCode(...).setAmount(...)`. **Не используем `@Builder`.**
 - `@FieldDefaults(level = AccessLevel.PRIVATE)` — поля автоматически `private`, не пиши модификатор руками. **Почему:** меньше визуального шума, единый стиль.
 
 ## Поля
@@ -36,11 +36,11 @@ public class OrderEntity {
 
 - Тип ID — `Long` по умолчанию.
 - Стратегия — `GenerationType.SEQUENCE` с собственной последовательностью на каждую таблицу.
-- Имя последовательности = `<имя_таблицы>_seq`. Имя генератора в `@SequenceGenerator` совпадает с именем sequence. `allocationSize = 1`.
+- Имя последовательности = `<имя_таблицы>_seq`. Имя генератора в `@SequenceGenerator` совпадает с именем sequence. `allocationSize` — см. ниже.
 
 ```java
 @Id
-@SequenceGenerator(name = "bonus_settings_seq", sequenceName = "bonus_settings_seq", allocationSize = 1)
+@SequenceGenerator(name = "bonus_settings_seq", sequenceName = "bonus_settings_seq", allocationSize = 50)
 @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "bonus_settings_seq")
 Long id;
 ```
@@ -48,6 +48,12 @@ Long id;
 **Почему `Long` + sequence по умолчанию, а не IDENTITY:**
 - Hibernate может батчить инсерты с sequence; с `IDENTITY` каждый insert требует отдельного `RETURNING` и батчинг ломается.
 - Sequence-имя предсказуемое и читаемое в скриптах/миграциях.
+
+**Про `allocationSize`:**
+- `allocationSize = 1` требует отдельный `nextval` на каждую вставку — это **убивает** батчинг инсертов, ради которого мы и выбрали sequence вместо IDENTITY. Не ставь `1` по умолчанию.
+- Ставь **pooled** `allocationSize > 1` (напр. `50`) — совпадает с `INCREMENT BY` последовательности в БД. Hibernate резервирует диапазон id одним `nextval` и раздаёт их без обращений к БД. **Почему:** батчинг работает, круговых походов к БД в разы меньше.
+- Компромисс: при рестарте приложения незанятый хвост диапазона теряется → в id появляются **gap'ы**. Для суррогатного ключа это норма, не полагайся на непрерывность нумерации.
+- `allocationSize = 1` допустим осознанно, только когда gap'ы недопустимы, а батчинг не нужен; тогда синхронизируй с `INCREMENT BY 1` в БД.
 
 **Когда предложить `UUID`** (агент **предлагает** пользователю, не выставляет молча):
 - ID должен быть известен на стороне Java **до flush** в БД (outbox-паттерн, составной idempotency-ключ вида `<id>:<plan>:<step>`).
@@ -63,7 +69,9 @@ UUID id;
 
 ### Время
 
-- Тип — `java.time.LocalDateTime`.
+- **Выбирай тип по семантике поля, а не по привычке:**
+  - `Instant` / `OffsetDateTime` — **ОК и предпочтительны** для UTC-меток аудита и машинных timestamp'ов (`createdAt`, `updatedAt`, `receivedAt`, «когда система записала»). Они хранят момент времени однозначно (timezone-safe), без привязки к локальной зоне.
+  - `LocalDateTime` / `ZonedDateTime` — для **бизнес-времени**: дневные окна, расписания, DST-логика, «в котором часу по локальной зоне произошло». `ZonedDateTime` — когда важна конкретная зона и переходы DST.
 - Имя поля — `xxxAt` (`createdAt`, `receivedAt`). 
 - Имя колонки через `@Column(name = "xxx_at")`.
 
@@ -110,6 +118,19 @@ void prePersist() {
 - Тип — `BigDecimal`. Никогда `double`/`float`.
 - `@Column(precision = 12, scale = 2)` или согласно требованию.
 
+### Оптимистичная блокировка
+
+- Для сущностей, которые **конкурентно изменяются** (два потока/запроса читают и пишут одну строку), добавь поле `@Version` — Hibernate проверяет версию на flush и бросает `OptimisticLockException` при затирании чужого изменения (lost update).
+- Тип — `Long` (или `int`), `nullable = false`.
+
+```java
+@Version
+@Column(name = "version", nullable = false)
+Long version;
+```
+
+- Retry-паттерн на конфликте версий (`@Retryable` + `409 Conflict` на границе) — см. скилл `jpa-patterns` (раздел «Optimistic Locking»).
+
 ## Запреты
 
 - **Не пиши `equals`/`hashCode` вручную.** Не нужны для работы с JPA-репозиторием по id. Если очень нужно — только по id.
@@ -121,7 +142,7 @@ void prePersist() {
 
 - [ ] Имя таблицы прописано через `@Table(name = ...)`.
 - [ ] Все колонки имеют `@Column(name = ...)`.
-- [ ] Время — `LocalDateTime`, нет ни одного `Instant`.
+- [ ] Тип времени выбран по семантике: `Instant`/`OffsetDateTime` для UTC-меток аудита, `LocalDateTime`/`ZonedDateTime` для бизнес-времени и DST.
 - [ ] Все обязательные колонки помечены `nullable = false`.
 - [ ] Уникальные бизнес-ключи имеют `unique = true` (либо составной `@Table(uniqueConstraints = ...)`).
 - [ ] Enum-поля — `@Enumerated(EnumType.STRING)`.

@@ -385,7 +385,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,prometheus,refresh  # refresh нужен для POST /actuator/refresh
   endpoint:
     health:
       show-details: always
@@ -396,10 +396,11 @@ management:
       enabled: true
     readinessState:
       enabled: true
+  prometheus:
+    metrics:
+      export:
+        enabled: true          # Boot 3.x: было management.metrics.export.prometheus.enabled
   metrics:
-    export:
-      prometheus:
-        enabled: true
     tags:
       application: ${spring.application.name}
 ```

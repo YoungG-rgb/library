@@ -19,19 +19,19 @@
 - Расписание — **только cron** через `@Scheduled(cron = "${...}")`. Не используем `fixedDelay`/`fixedRate`.
 - Метод scheduler-а называется `process()`, не `tick()`.
 - `@Async` на scheduler-методе **не нужен**: тело тика делает быстрый claim + submit и сразу возвращается на дефолтный TaskScheduler-thread.
-- Над классом scheduler-а — `@ConditionalOnExpression("${schedulers.<feature>.is-running} == 'true'")`. Если `is-running=false` или отсутствует — бин не создаётся.
+- Над классом scheduler-а — `@ConditionalOnProperty(prefix = "schedulers.<feature>", name = "is-running", havingValue = "true")`. Если `is-running=false` или отсутствует — бин не создаётся (проще SpEL, без его ловушек с кавычками).
 
 ## Обязательные пропсы scheduler-а
 
-Все — под общим префиксом `schedulers.<feature-name>.*`, kebab-case. **Дефолтов в плейсхолдерах нет** — пропсы должны быть в `application.yaml` (там уже разрешено брать дефолты из env-переменных `UPPER_SNAKE` через `${ENV_NAME:default}`).
+Все — под общим префиксом `schedulers.<feature-name>.*`, kebab-case. **Дефолтов в плейсхолдерах нет** — пропсы должны быть в `application.yml` (там уже разрешено брать дефолты из env-переменных `UPPER_SNAKE` через `${ENV_NAME:default}`).
 
 | Свойство                          | Обязательно                   | Назначение                                                                                              |
 |-----------------------------------|-------------------------------|---------------------------------------------------------------------------------------------------------|
-| `schedulers.<feature>.is-running` | да                            | feature flag для `@ConditionalOnExpression`. Если `false` — бин не создаётся, scheduler не запускается. |
+| `schedulers.<feature>.is-running` | да                            | feature flag для `@ConditionalOnProperty`. Если `false` — бин не создаётся, scheduler не запускается.  |
 | `schedulers.<feature>.cron`       | да, если `is-running=true`    | cron-выражение. Пустая строка / отсутствие → Spring отвергнет на старте, это сознательная защита.       |
 | `schedulers.<feature>.batch-size` | да, если есть фан-аут task-ов | размер партии за тик.                                                                                   |
 
-Пример блока в `application.yaml`:
+Пример блока в `application.yml`:
 
 ```yaml
 schedulers:
@@ -50,7 +50,7 @@ schedulers:
 ```java
 @Component
 @RequiredArgsConstructor
-@ConditionalOnExpression(value = "'${schedulers.foo.is-running}' == 'true'")
+@ConditionalOnProperty(prefix = "schedulers.foo", name = "is-running", havingValue = "true")
 public class FooScheduler {
     private final FooRepository fooRepository;
     private final ApplicationContext applicationContext;
@@ -71,7 +71,7 @@ public class FooScheduler {
 ```
 
 Что важно:
-- Claim+смена статуса — атомарно в одном SQL через CTE с `FOR UPDATE SKIP LOCKED + UPDATE … RETURNING` (см. пример в `ClientBonusStateRepository.findAndLockByStatus`). После коммита другие инстансы строки не подберут — статус уже не `NEW`.
+- Claim+смена статуса — атомарно в одном SQL через CTE с `FOR UPDATE SKIP LOCKED + UPDATE … RETURNING` (см. пример в `FooRepository.findAndLockByStatus`). После коммита другие инстансы строки не подберут — статус уже не `NEW`.
 - Task создаётся через `applicationContext.getBean(FooTask.class, state)` — Spring передаёт `state` в конструктор и автовайрит остальные зависимости.
 - Никакой бизнес-логики в scheduler-е — только claim, обёртывание в Task, submit.
 
@@ -91,9 +91,9 @@ public class FooTask implements Runnable {
     @Override
     public void run() {
         try {
-            MDC.put("traceId", "traceId");
+            MDC.put("X-Request-Id", state.getRequestId());
             // per-row логика; state приходит детачнутой (CTE-fetcher делает clearAutomatically=true),
-            // bonusStateRepository.save(state) корректно мержит.
+            // fooRepository.save(state) корректно мержит.
         } catch (Exception e) {
             log.error("FooTask failed for id={}", state.getId(), e);
         } finally {
@@ -112,14 +112,7 @@ public class FooTask implements Runnable {
 
 ### Executor
 
-```java
-@Bean("fooTaskExecutor")
-public ExecutorService fooTaskExecutor() {
-    return Executors.newVirtualThreadPerTaskExecutor();   // Java 21+
-}
-```
-
-Для Java 17 и ниже — `ThreadPoolTaskExecutor` с `corePoolSize`/`maxPoolSize`/`queueCapacity` через `@Value` (см. ниже отдельный раздел).
+`ExecutorService`-бин (`fooTaskExecutor`) — см. раздел [Executor (если фан-аут)](#executor-если-фан-аут) ниже: виртуальные потоки на Java 21+, `ThreadPoolTaskExecutor` на Java ≤17.
 
 ## Вариант B. Scheduler без фан-аута (прямая делегация)
 
@@ -129,7 +122,7 @@ public ExecutorService fooTaskExecutor() {
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnExpression(value = "${schedulers.bar.is-running} == 'true'")
+@ConditionalOnProperty(prefix = "schedulers.bar", name = "is-running", havingValue = "true")
 public class BarScheduler {
     private final BarService barService;
 
@@ -144,7 +137,7 @@ public class BarScheduler {
 }
 ```
 
-Никаких `ApplicationContext`, executor-ов, batch-size — этого всего нет, потому что нет фан-аута. Структурный shell тот же: пакет `schedulers/`, `@ConditionalOnExpression`, cron-проперть, метод `process()`.
+Никаких `ApplicationContext`, executor-ов, batch-size — этого всего нет, потому что нет фан-аута. Структурный shell тот же: пакет `schedulers/`, `@ConditionalOnProperty`, cron-проперть, метод `process()`.
 
 ## Executor (если фан-аут)
 
@@ -181,8 +174,8 @@ public ThreadPoolTaskExecutor fooTaskExecutor(
 
 - **Перекрытие тиков.** В рамках одного инстанса cron-`@Scheduled` не запустит новый тик, пока предыдущий не завершился. Так как `process()` сам не блокируется на работе тасок (только submit), это редко актуально — но если делегирующая `BarService.tick()` идёт дольше cron — это сигнал увеличить интервал.
 - **Shutdown.** Для `ExecutorService`-бинов Spring сам вызовет `shutdown()` при остановке контекста. Не пиши `@PreDestroy`, если ничего нестандартного нет.
-- **MDC.** Виртуальные потоки и пулы не наследуют MDC автоматически. Нужен `traceId` в логах задачи — ставь MDC внутри `Task.run()`, не рассчитывай на родительский поток.
-- **Stuck `IN_PROGRESS`.** При фан-аут-варианте, если JVM упадёт между fetcher-commit и task-run, строки останутся в `IN_PROGRESS` навсегда. Документируй процедуру ручного восстановления (`UPDATE … paid_status='NEW' WHERE …`) в support-runbook.
+- **MDC.** Виртуальные потоки и пулы не наследуют MDC автоматически. Нужен бизнес-ключ (`requestId`/`eventId`) в логах задачи — ставь MDC внутри `Task.run()`, не рассчитывай на родительский поток. Technical `traceId/spanId` ставит micrometer-tracing сам — руками не трогай (см. `correlation-and-tracing.md`).
+- **Stuck `IN_PROGRESS`.** При фан-аут-варианте, если JVM упадёт между fetcher-commit и task-run, строки останутся в `IN_PROGRESS` навсегда. Документируй процедуру ручного восстановления (`UPDATE … status='NEW' WHERE …`) в support-runbook.
 
 ## Координация нескольких инстансов
 
@@ -192,10 +185,10 @@ public ThreadPoolTaskExecutor fooTaskExecutor(
 
 - [ ] `@EnableScheduling` подключён один раз.
 - [ ] Класс scheduler-а лежит в `<feature>/schedulers/`, имя — `<Feature>Scheduler`.
-- [ ] Над классом — `@ConditionalOnExpression("${schedulers.<feature>.is-running} == 'true'")`.
+- [ ] Над классом — `@ConditionalOnProperty(prefix = "schedulers.<feature>", name = "is-running", havingValue = "true")`.
 - [ ] Метод scheduler-а — `process()`. Расписание — `@Scheduled(cron = "${schedulers.<feature>.cron}")`.
 - [ ] Без `@Async` на scheduler-методе.
-- [ ] В `application.yaml` заведён блок `schedulers.<feature>.{is-running,cron[,batch-size]}` с env-override через `${ENV_NAME:default}`.
+- [ ] В `application.yml` заведён блок `schedulers.<feature>.{is-running,cron[,batch-size]}` с env-override через `${ENV_NAME:default}`.
 - [ ] При фан-ауте: Task лежит в `<feature>/schedulers/tasks/`, помечен `@Component @Scope(SCOPE_PROTOTYPE)`, конструктор принимает только runtime-arg, остальные deps — `@Autowired` field-injection.
 - [ ] При фан-ауте: per-row claim через CTE-запрос `FOR UPDATE SKIP LOCKED + UPDATE … RETURNING`, не «фетч + ручной UPDATE».
 - [ ] При фан-ауте: один `ExecutorService`-бин на scheduler, виртуальные потоки (Java 21+) либо `ThreadPoolTaskExecutor` с параметрами через `@Value` (Java ≤17).

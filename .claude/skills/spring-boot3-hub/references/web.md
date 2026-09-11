@@ -11,19 +11,19 @@ public class UserController {
     private final UserService userService;
     
     @GetMapping
-    public ResponseEntity<Page<UserDto>> getUsers(
+    public ResponseEntity<Page<UserResponse>> getUsers(
             @PageableDefault(size = 20, sort = "createdAt") Pageable pageable) {
         return ResponseEntity.ok(userService.findAll(pageable));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<UserDto> getUser(@PathVariable Long id) {
+    public ResponseEntity<UserResponse> getUser(@PathVariable Long id) {
         return ResponseEntity.ok(userService.findById(id));
     }
 
     @PostMapping
-    public ResponseEntity<UserDto> createUser(@Valid @RequestBody UserCreateRequest request) {
-        UserDto user = userService.create(request);
+    public ResponseEntity<UserResponse> createUser(@Valid @RequestBody UserCreateRequest request) {
+        UserResponse user = userService.create(request);
         URI location = ServletUriComponentsBuilder
                 .fromCurrentRequest()
                 .path("/{id}")
@@ -33,8 +33,10 @@ public class UserController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<UserDto> updateUser(@Valid @RequestBody UserUpdateRequest request) {
-        return ResponseEntity.ok(userService.update(request));
+    public ResponseEntity<UserResponse> updateUser(
+            @PathVariable Long id,
+            @Valid @RequestBody UserUpdateRequest request) {
+        return ResponseEntity.ok(userService.update(id, request));
     }
 
     @DeleteMapping("/{id}")
@@ -81,7 +83,7 @@ public record UserUpdateRequest(
 ## Response DTOs
 
 ```java
-public record UserDto (
+public record UserResponse (
     Long id,
     String email,
     String username,
@@ -136,7 +138,7 @@ public record UserDto (
 ```java
 @Mapper
 public interface UserMapper {
-    UserDto toDto(User entity);
+    UserResponse toResponse(User entity);
     User toEntity(UserCreateRequest userCreateRequest);
 }
 ```

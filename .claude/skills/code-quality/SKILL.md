@@ -136,6 +136,8 @@ public class UserService { }
 | PATCH  | Partial update          | No*        | No   |
 | DELETE | Remove resource         | Yes        | No   |
 
+> \* PATCH по спецификации (RFC 5789) **не обязан** быть идемпотентным, но может быть спроектирован таковым (напр. `set field = value` идемпотентен, а `increment by 1` — нет). Если операция не идемпотентна — защищайся от повторов idempotency-key'ом.
+
 **Common Mistakes:**
 ```java
 // ❌ POST for retrieval

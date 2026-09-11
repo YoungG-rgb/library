@@ -53,6 +53,7 @@
 - Интерфейсы сервисов на верхнем уровне пакета (`OrderService`).
 - Имплементации — в подпакете `impl/` (`OrderServiceImpl`).
 - Внутренние DTO между сервисами (если не доменные) — в `services.dto` (если файлов > 3).
+- `base_impl/` — для абстрактных базовых процессоров и резолверов typed-handler registry (`XxxStageProcessor` abstract, `XxxStateResolver`), когда конкретные обработчики живут в `impl/`. См. [service-transactional.md](service-transactional.md), раздел «Typed-handler registry».
 
 ### `config`
 - `@Configuration`-классы, специфичные для фичи: AMQP exchange/queue для этой фичи, специфичные `RestClient`-бины, `@ConfigurationProperties` фичи.

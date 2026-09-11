@@ -59,7 +59,6 @@ Effective logging for Java applications with focus on structured, AI-parsable fo
 | Error extraction | Parse stack trace text     | `exception` field   |
 | Filtering        | grep patterns              | `jq` queries        |
 
-### Recommended Setup for AI-Assisted Development
 ### Log Format Optimized for AI Analysis
 
 ```json
@@ -125,7 +124,7 @@ spring:
 <dependency>
     <groupId>net.logstash.logback</groupId>
     <artifactId>logstash-logback-encoder</artifactId>
-    <version>7.4</version>
+    <!-- версия из BOM (Spring Boot управляет ей сам) -->
 </dependency>
 <dependency>
     <groupId>org.codehaus.janino</groupId>
@@ -141,7 +140,7 @@ spring:
   <springProperty scope="context" name="service-name" source="spring.application.name"/>
   <springProperty scope="context" name="env" source="spring.application.environment" defaultValue="local"/>
   <property name="LOG_PATTERN"
-            value="%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) %cyan([${service-name}]) %green([%logger{1}]) %yellow([%X{X-B3-TraceId}]) %magenta([%thread]) %green([%logger{1}]) - %msg%n"/>
+            value="%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) %cyan([${service-name}]) %green([%logger{1}]) %yellow([%X{X-Request-Id}]) %magenta([%thread]) - %msg%n"/>
 
   <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
@@ -158,7 +157,9 @@ spring:
       <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
         <destination>${LOGSTASH_HOST:-localhost}:${LOGSTASH_PORT:-5000}</destination>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-          <includeMdcKeyName>X-B3-TraceId</includeMdcKeyName>
+          <includeMdcKeyName>X-Request-Id</includeMdcKeyName>
+          <includeMdcKeyName>traceId</includeMdcKeyName>
+          <includeMdcKeyName>spanId</includeMdcKeyName>
           <customFields>{"application":"service-name"}</customFields>
         </encoder>
         <keepAliveDuration>5 minutes</keepAliveDuration>
@@ -212,4 +213,19 @@ log.debug("Processing order " + orderId + " for user " + userId);
 
 // ✅ For expensive operations
 if (log.isDebugEnabled()) {
+    log.debug("Order snapshot: {}", expensiveSerialize(order));
+}
+```
+
+### Placeholders & Exceptions
+
+```java
+// ✅ Плейсхолдеры {}, аргументы по порядку — никакой конкатенации
+log.info("Order {} created for user {}", orderId, userId);
+
+// ✅ Исключение — последним аргументом, БЕЗ своего {}; SLF4J возьмёт stack trace
+log.error("Order {} failed", orderId, exception);
+
+// ❌ Не клади e.getMessage() в строку — потеряешь stack trace
+log.error("Order failed: " + exception.getMessage());
 ```

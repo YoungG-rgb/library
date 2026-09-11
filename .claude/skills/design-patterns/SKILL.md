@@ -79,6 +79,8 @@ DatasourceProperties properties = new DatasourceProperties()
         .addAdditionalData("key", 1);
 ```
 
+> ⚠️ `@Data` здесь допустим, потому что это **обычный value/config-объект вне persistence**. **На JPA-сущностях `@Data` НЕ применять** — его `equals`/`hashCode`/`toString` по всем полям ломают identity-семантику и вызывают LazyInitializationException в `toString`. Для сущностей — `@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Accessors(chain = true)` (см. `.claude/standards/jpa-entity.md`). `@Data` уместен только на immutable value-объектах / DTO вне JPA.
+
 ### Factory
 **Problem:** Create objects without knowing exact class upfront
 
@@ -200,6 +202,54 @@ public class EmailListener {
     }
 }
 ```
+
+> ⚠️ `@Async` работает только при наличии `@EnableAsync` в конфигурации приложения — без него аннотация **молча игнорируется** и слушатель выполняется синхронно в потоке публикатора. Убедись, что где-то есть `@Configuration @EnableAsync`.
+
+### Typed-Handler Registry
+
+**Problem:** `if/switch` на 4+ значений одного enum, каждая ветка — своя логика. Generic Strategy тут заменяется registry, где Spring сам собирает обработчики.
+
+**Каноничная реализация в проекте — `.claude/standards/service-transactional.md` (раздел «Typed-handler registry»).** Минимальный скелет:
+
+```java
+// 1. Контракт обработчика — типизирован по enum-значению
+public interface OrderHandler {
+    OrderStatus supports();          // за какое значение отвечает
+    void handle(OrderEvent event);
+}
+
+// 2. Конкретные обработчики — по одному @Component на значение,
+//    имя по бизнес-событию, не по enum-константе
+@Component
+class OrderCreatedHandler implements OrderHandler {
+    public OrderStatus supports() { return OrderStatus.CREATED; }
+    public void handle(OrderEvent event) { /* ... */ }
+}
+
+// 3. Resolver — Spring инжектит List<OrderHandler>, собираем в EnumMap
+@Component
+public class OrderHandlerRegistry {
+    private final Map<OrderStatus, OrderHandler> handlers;
+
+    public OrderHandlerRegistry(List<OrderHandler> beans) {
+        this.handlers = new EnumMap<>(OrderStatus.class);
+        for (OrderHandler h : beans) {
+            if (handlers.putIfAbsent(h.supports(), h) != null) {
+                // дублирующая регистрация → падаем на старте, а не в рантайме
+                throw new IllegalStateException("Duplicate handler for " + h.supports());
+            }
+        }
+    }
+
+    public OrderHandler resolve(OrderStatus status) {
+        OrderHandler h = handlers.get(status);
+        if (h == null) throw new IllegalArgumentException("No handler for " + status);
+        return h;
+    }
+}
+```
+
+**Почему:** новый тип = новый `@Component`, без правки `switch`. Дедуп через `IllegalStateException` ловит коллизии при старте. Общие зависимости выноси в абстрактный базовый обработчик (см. стандарт).
 
 ---
 

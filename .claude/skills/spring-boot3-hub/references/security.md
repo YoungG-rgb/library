@@ -11,10 +11,7 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-            .csrf(csrf -> csrf
-                .ignoringRequestMatchers("/api/auth/**")
-                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-            )
+            .csrf(csrf -> csrf.disable()) // для stateless JWT (сессий нет) CSRF не нужен
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**", "/actuator/health").permitAll()
@@ -65,6 +62,7 @@ public class SecurityConfig {
 ## JWT Authentication Filter
 
 ```java
+@Slf4j
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
@@ -78,7 +76,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(
             @NonNull HttpServletRequest request,
-            @NonNull HttpServletRequest response,
+            @NonNull HttpServletResponse response,
             @NonNull FilterChain filterChain) throws ServletException, IOException {
 
         final String authHeader = request.getHeader("Authorization");
@@ -128,14 +126,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 ```java
 @Service
 public class JwtService {
-    @Value("${jwt.secret}")
-    private String secretKey;
+    private final String secretKey;
+    private final long jwtExpiration;
+    private final long refreshExpiration;
 
-    @Value("${jwt.expiration}")
-    private long jwtExpiration;
-
-    @Value("${jwt.refresh-expiration}")
-    private long refreshExpiration;
+    public JwtService(
+            @Value("${jwt.secret}") String secretKey,
+            @Value("${jwt.expiration}") long jwtExpiration,
+            @Value("${jwt.refresh-expiration}") long refreshExpiration) {
+        this.secretKey = secretKey;
+        this.jwtExpiration = jwtExpiration;
+        this.refreshExpiration = refreshExpiration;
+    }
 
     public String extractUsername(String token) {
         return extractClaim(token, Claims::getSubject);
@@ -171,11 +173,11 @@ public class JwtService {
             long expiration) {
         return Jwts
             .builder()
-            .setClaims(extraClaims)
-            .setSubject(userDetails.getUsername())
-            .setIssuedAt(new Date(System.currentTimeMillis()))
-            .setExpiration(new Date(System.currentTimeMillis() + expiration))
-            .signWith(getSignInKey(), SignatureAlgorithm.HS256)
+            .claims(extraClaims)
+            .subject(userDetails.getUsername())
+            .issuedAt(new Date(System.currentTimeMillis()))
+            .expiration(new Date(System.currentTimeMillis() + expiration))
+            .signWith(getSignInKey(), Jwts.SIG.HS256)
             .compact();
     }
 
@@ -194,14 +196,14 @@ public class JwtService {
 
     private Claims extractAllClaims(String token) {
         return Jwts
-            .parserBuilder()
-            .setSigningKey(getSignInKey())
+            .parser()
+            .verifyWith(getSignInKey())
             .build()
-            .parseClaimsJws(token)
-            .getBody();
+            .parseSignedClaims(token)
+            .getPayload();
     }
 
-    private Key getSignInKey() {
+    private SecretKey getSignInKey() {
         byte[] keyBytes = Decoders.BASE64.decode(secretKey);
         return Keys.hmacShaKeyFor(keyBytes);
     }
@@ -368,22 +370,31 @@ public class UserService {
     private final UserRepository userRepository;
 
     @PreAuthorize("hasRole('ADMIN')")
-    public List<User> getAllUsers() {
-        return userRepository.findAll();
+    public List<UserResponse> getAllUsers() {
+        return userRepository.findAll().stream()
+            .map(this::toResponse)
+            .toList();
     }
 
     @PreAuthorize("hasRole('ADMIN') or #userId == authentication.principal.id")
-    public User getUserById(Long userId) {
-        return userRepository.findById(userId)
+    public UserResponse getUserById(Long userId) {
+        User user = userRepository.findById(userId)
             .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        return toResponse(user);
+    }
+
+    // Маппинг entity -> DTO: наружу отдаём только DTO, не JPA-сущность
+    private UserResponse toResponse(User user) {
+        return new UserResponse(user.getId(), user.getEmail(), user.getUsername());
     }
 
     @PreAuthorize("isAuthenticated()")
     @PostAuthorize("returnObject.email == authentication.principal.username")
-    public User updateProfile(Long userId, UserUpdateRequest request) {
-        User user = getUserById(userId);
+    public UserResponse updateProfile(Long userId, UserUpdateRequest request) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         // Update logic
-        return userRepository.save(user);
+        return toResponse(userRepository.save(user));
     }
 
     @Secured({"ROLE_ADMIN", "ROLE_MANAGER"})

@@ -28,7 +28,7 @@ Review Java concurrent code for correctness, safety, and modern best practices.
 
 ## Why This Matters
 
-> Nearly 60% of multithreaded applications encounter issues due to improper management of shared resources. - ACM Study
+Неправильное управление разделяемым состоянием — одна из самых частых причин дефектов в многопоточном коде.
 
 Concurrency bugs are:
 - **Hard to reproduce** - timing-dependent
@@ -147,11 +147,11 @@ public class OrderService {
     public void sendConfirmation(Order order) { }
 }
 
-// ✅ Inject self or use separate service
+// ✅ Inject self or use separate service (конструкторная инъекция!)
 @Service
+@RequiredArgsConstructor
 public class OrderService {
-    @Autowired
-    private EmailService emailService;  // Separate bean
+    private final EmailService emailService;  // Separate bean
 
     public void processOrder(Order order) {
         emailService.sendConfirmation(order);  // Proxy call, async works

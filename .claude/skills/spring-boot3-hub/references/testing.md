@@ -127,17 +127,25 @@ class UserIntegrationTest {
             15
         );
 
-        // When
-        ResponseEntity<ValidationErrorResponse> response = restTemplate.postForEntity(
+        // When: ошибки отдаются как RFC 9457 ProblemDetail, не как самописный error-DTO
+        ResponseEntity<ProblemDetail> response = restTemplate.postForEntity(
             "/api/v1/users",
             request,
-            ValidationErrorResponse.class
+            ProblemDetail.class
         );
 
         // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().errors()).isNotEmpty();
+        assertThat(response.getHeaders().getContentType())
+            .isEqualTo(MediaType.APPLICATION_PROBLEM_JSON);
+        ProblemDetail body = response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(body.getStatus()).isEqualTo(400);
+        assertThat(body.getTitle()).isEqualTo("Validation error");
+        assertThat(body.getType().toString()).endsWith("/validation-error");
+        assertThat(body.getDetail()).isNotBlank();
+        // extension-поле errors: map поле -> сообщение
+        assertThat(body.getProperties()).containsKey("errors");
     }
 }
 ```
@@ -246,12 +254,11 @@ class UserRepositoryTest {
     @DisplayName("Should find user by email")
     void shouldFindUserByEmail() {
         // Given
-        User user = User.builder()
-            .email("test@example.com")
-            .password("password")
-            .username("testuser")
-            .active(true)
-            .build();
+        User user = new User()
+            .setEmail("test@example.com")
+            .setPassword("password")
+            .setUsername("testuser")
+            .setIsActive(true);
 
         entityManager.persistAndFlush(user);
 
@@ -267,12 +274,11 @@ class UserRepositoryTest {
     @DisplayName("Should check if email exists")
     void shouldCheckIfEmailExists() {
         // Given
-        User user = User.builder()
-            .email("test@example.com")
-            .password("password")
-            .username("testuser")
-            .active(true)
-            .build();
+        User user = new User()
+                .setEmail("test@example.com")
+                .setPassword("password")
+                .setUsername("testuser")
+                .setIsActive(true);
 
         entityManager.persistAndFlush(user);
 
@@ -287,16 +293,15 @@ class UserRepositoryTest {
     @DisplayName("Should fetch user with roles")
     void shouldFetchUserWithRoles() {
         // Given
-        Role adminRole = Role.builder().name("ADMIN").build();
+        Role adminRole = new Role().setName("ADMIN");
         entityManager.persist(adminRole);
 
-        User user = User.builder()
-            .email("admin@example.com")
-            .password("password")
-            .username("admin")
-            .active(true)
-            .roles(Set.of(adminRole))
-            .build();
+        User user = new User()
+                .setEmail("test@example.com")
+                .setPassword("password")
+                .setUsername("testuser")
+                .setIsActive(true)
+                .setRoles(Set.of(adminRole));
 
         entityManager.persistAndFlush(user);
         entityManager.clear();
@@ -320,12 +325,17 @@ class UserRepositoryTest {
 @ActiveProfiles("test")
 class UserServiceIntegrationTest {
 
+    // Рекомендуемо (Boot 3.1+): @ServiceConnection сам прописывает url/username/password
+    // из контейнера — @DynamicPropertySource ниже больше не нужен.
     @Container
+    @ServiceConnection
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15-alpine")
         .withDatabaseName("testdb")
         .withUsername("test")
         .withPassword("test");
 
+    // Legacy-вариант (до Boot 3.1 или для не покрытых @ServiceConnection проперти):
+    // ручной проброс через @DynamicPropertySource. С @ServiceConnection выше — убрать.
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
@@ -498,14 +508,13 @@ public class TestConfig {
 public class TestDataFactory {
 
     public static User createUser(String email, String username) {
-        return User.builder()
-            .email(email)
-            .password("encodedPassword")
-            .username(username)
-            .active(true)
-            .createdAt(LocalDateTime.now())
-            .updatedAt(LocalDateTime.now())
-            .build();
+        return new User()
+            .setEmail(email)
+            .setPassword("encodedPassword")
+            .setUsername(username)
+            .setIsActive(true)
+            .setCreatedAt(LocalDateTime.now())
+            .setUpdatedAt(LocalDateTime.now());
     }
 
     public static UserCreateRequest createUserRequest() {
@@ -521,16 +530,16 @@ public class TestDataFactory {
 
 ## Quick Reference
 
-| Annotation | Purpose |
-|------------|---------|
-| `@SpringBootTest` | Full application context integration test |
-| `@WebMvcTest` | Test MVC controllers with mocked services |
-| `@WebFluxTest` | Test reactive controllers |
-| `@DataJpaTest` | Test JPA repositories with in-memory database |
-| `@MockitoBean` | Mock bean in context (Boot 3.4+; ранее `@MockBean`, устарел в 3.4) |
-| `@WithMockUser` | Mock authenticated user for security tests |
-| `@Testcontainers` | Enable Testcontainers support |
-| `@ActiveProfiles` | Activate specific Spring profiles for test |
+| Annotation        | Purpose                                                            |
+|-------------------|--------------------------------------------------------------------|
+| `@SpringBootTest` | Full application context integration test                          |
+| `@WebMvcTest`     | Test MVC controllers with mocked services                          |
+| `@WebFluxTest`    | Test reactive controllers                                          |
+| `@DataJpaTest`    | Test JPA repositories with in-memory database                      |
+| `@MockitoBean`    | Mock bean in context (Boot 3.4+; ранее `@MockBean`, устарел в 3.4) |
+| `@WithMockUser`   | Mock authenticated user for security tests                         |
+| `@Testcontainers` | Enable Testcontainers support                                      |
+| `@ActiveProfiles` | Activate specific Spring profiles for test                         |
 
 ## Testing Best Practices
 
