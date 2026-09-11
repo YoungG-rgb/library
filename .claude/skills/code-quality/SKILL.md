@@ -14,6 +14,7 @@ description: Comprehensive code review for Java - clean code principles, API con
 | Spring Data репозитории    | `.claude/standards/spring-data-repository.md` |
 | Сервисы и `@Transactional` | `.claude/standards/service-transactional.md`  |
 | Шедулеры                   | `.claude/standards/scheduler.md`              |
+| Стиль кода (Checkstyle)    | `.claude/standards/code-style.md`             |
 
 Жёсткие правила (всегда применять при ревью, даже если в коде сделано иначе):
 - **PII** (msisdn, PAN, email, паспорт) — никогда в логах в исходном виде, никогда в MDC. Только через маскер проекта.

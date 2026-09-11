@@ -18,6 +18,7 @@
 - [application-config.md](application-config.md) — `application.yml`: структура по концернам, плейсхолдеры, секреты без дефолта.
 - [correlation-and-tracing.md](correlation-and-tracing.md) — `X-Request-Id`, трейсинг, Context↔MDC, проброс к downstream. **Владелец темы логирования/MDC:** правила MDC живут здесь (а детали структурного логирования — в скилле `logging-patterns`); в [service-transactional.md](service-transactional.md) — только краткий сервис-специфичный минимум со ссылкой сюда, без дублирования.
 - [error-handling.md](error-handling.md) — `ProblemDetail` (RFC 9457), доменные исключения, реестр типов, вынос в starter.
+- [code-style.md](code-style.md) — стиль кода (Checkstyle): `checkstyle.xml`, подключение, гейтинг сборки, форматтер IDE.
 
 ## Правила ведения
 

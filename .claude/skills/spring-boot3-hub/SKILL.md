@@ -23,6 +23,7 @@ metadata:
 | Конфигурация (`application.yml`, профили, секреты)       | `.claude/standards/application-config.md`      |
 | Корреляция и трейсинг (`X-Request-Id`, MDC, downstream)  | `.claude/standards/correlation-and-tracing.md` |
 | Обработка ошибок (`ProblemDetail`, доменные исключения)  | `.claude/standards/error-handling.md`          |
+| Стиль кода (Checkstyle, `checkstyle.xml`, отступы/длина) | `.claude/standards/code-style.md`              |
 
 **CLAUDE.md** проекта — всегда главнее всего. Прочитай его перед структурными изменениями.
 
@@ -68,6 +69,7 @@ metadata:
 | Тесты: unit, slice, integration, TestContainers                    | —                        | —                                                                        | `references/testing.md`  |
 | Миграции схемы (Flyway/Liquibase)                                  | —                        | `jpa-entity.md` (имена таблиц/sequence)                                  | `references/data.md`     |
 | Observability: метрики, Actuator, трейсинг (Micrometer)            | **`logging-patterns`**   | `correlation-and-tracing.md`                                             | `references/cloud.md`    |
+| Стиль кода, Checkstyle, форматтер, отступы/длина строки            | **`code-quality`**       | `code-style.md`                                                          | —                        |
 
 **Правило маршрутизации:** если для области есть специализированный скилл — приоритет у него; этот скилл лишь связывает области и следит за сквозными правилами.
 
