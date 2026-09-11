@@ -22,6 +22,7 @@ metadata:
 | Шедулеры (`@Scheduled`, virtual threads, claim+dispatch) | `.claude/standards/scheduler.md`               |
 | Конфигурация (`application.yml`, профили, секреты)       | `.claude/standards/application-config.md`      |
 | Корреляция и трейсинг (`X-Request-Id`, MDC, downstream)  | `.claude/standards/correlation-and-tracing.md` |
+| Обработка ошибок (`ProblemDetail`, доменные исключения)  | `.claude/standards/error-handling.md`          |
 
 **CLAUDE.md** проекта — всегда главнее всего. Прочитай его перед структурными изменениями.
 
@@ -51,21 +52,22 @@ metadata:
 
 ## Куда делегировать (routing map)
 
-| Область запроса                                                 | Специализированный скилл | Проектный стандарт                                                       | Reference                |
-|-----------------------------------------------------------------|--------------------------|--------------------------------------------------------------------------|--------------------------|
-| JPA: сущности, репозитории, N+1, lazy, транзакции, locking      | **`jpa-patterns`**       | `jpa-entity.md`, `spring-data-repository.md`, `service-transactional.md` | `references/data.md`     |
-| Логи, MDC, structured logging, PII-маскирование                 | **`logging-patterns`**   | `service-transactional.md` (MDC), `correlation-and-tracing.md`           | —                        |
-| Корреляция / трейсинг / проброс к downstream                    | **`logging-patterns`**   | `correlation-and-tracing.md`                                             | `references/web.md`      |
-| Async, потоки, `@Async`, `CompletableFuture`, virtual threads   | **`concurrency-review`** | `scheduler.md`                                                           | —                        |
-| Шедулеры, claim+dispatch, батчи                                 | —                        | `scheduler.md`                                                           | —                        |
-| Design patterns, typed-handler registry, factory                | **`design-patterns`**    | `service-transactional.md` (registry)                                    | —                        |
-| Код-ревью, чистота, API-контракты, null-safety                  | **`code-quality`**       | все применимые                                                           | —                        |
-| Web/REST: контроллеры, валидация, exception handling, WebClient | —                        | —                                                                        | `references/web.md`      |
-| Security: Spring Security 6, OAuth2, JWT                        | —                        | —                                                                        | `references/security.md` |
-| Cloud/Config: config server, discovery, resilience              | —                        | `application-config.md`                                                  | `references/cloud.md`    |
-| Тесты: unit, slice, integration, TestContainers                 | —                        | —                                                                        | `references/testing.md`  |
-| Миграции схемы (Flyway/Liquibase)                               | —                        | `jpa-entity.md` (имена таблиц/sequence)                                  | `references/data.md`     |
-| Observability: метрики, Actuator, трейсинг (Micrometer)         | **`logging-patterns`**   | `correlation-and-tracing.md`                                             | `references/cloud.md`    |
+| Область запроса                                                    | Специализированный скилл | Проектный стандарт                                                       | Reference                |
+|--------------------------------------------------------------------|--------------------------|--------------------------------------------------------------------------|--------------------------|
+| JPA: сущности, репозитории, N+1, lazy, транзакции, locking         | **`jpa-patterns`**       | `jpa-entity.md`, `spring-data-repository.md`, `service-transactional.md` | `references/data.md`     |
+| Логи, MDC, structured logging, PII-маскирование                    | **`logging-patterns`**   | `service-transactional.md` (MDC), `correlation-and-tracing.md`           | —                        |
+| Корреляция / трейсинг / проброс к downstream                       | **`logging-patterns`**   | `correlation-and-tracing.md`                                             | `references/web.md`      |
+| Async, потоки, `@Async`, `CompletableFuture`, virtual threads      | **`concurrency-review`** | `scheduler.md`                                                           | —                        |
+| Шедулеры, claim+dispatch, батчи                                    | —                        | `scheduler.md`                                                           | —                        |
+| Design patterns, typed-handler registry, factory                   | **`design-patterns`**    | `service-transactional.md` (registry)                                    | —                        |
+| Код-ревью, чистота, API-контракты, null-safety                     | **`code-quality`**       | все применимые                                                           | —                        |
+| Web/REST: контроллеры, валидация, exception handling, WebClient    | —                        | `error-handling.md`                                                      | `references/web.md`      |
+| Обработка ошибок: ProblemDetail, доменные исключения, реестр типов | —                        | `error-handling.md`                                                      | `references/web.md`      |
+| Security: Spring Security 6, OAuth2, JWT                           | —                        | —                                                                        | `references/security.md` |
+| Cloud/Config: config server, discovery, resilience                 | —                        | `application-config.md`                                                  | `references/cloud.md`    |
+| Тесты: unit, slice, integration, TestContainers                    | —                        | —                                                                        | `references/testing.md`  |
+| Миграции схемы (Flyway/Liquibase)                                  | —                        | `jpa-entity.md` (имена таблиц/sequence)                                  | `references/data.md`     |
+| Observability: метрики, Actuator, трейсинг (Micrometer)            | **`logging-patterns`**   | `correlation-and-tracing.md`                                             | `references/cloud.md`    |
 
 **Правило маршрутизации:** если для области есть специализированный скилл — приоритет у него; этот скилл лишь связывает области и следит за сквозными правилами.
 

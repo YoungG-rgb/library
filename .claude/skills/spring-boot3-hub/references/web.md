@@ -143,8 +143,17 @@ public interface UserMapper {
 
 ## Global Exception Handling
 
+> Полные правила (формат, реестр типов, PII в ошибках, корреляция, вынос в общий
+> starter) — стандарт [`error-handling.md`](../../../standards/error-handling.md).
+> Ниже — self-contained пример для одного сервиса.
+
 Доменные исключения несут **свой `ProblemType`** — тогда один handler на всю иерархию,
 без per-exception `@ExceptionHandler`. (`ProblemType` определён ниже.)
+
+> **Мультисервис:** при ≥2 сервисах вынеси **механизм** (контракт
+> `interface ProblemType { String slug(); String title(); HttpStatus status(); }`,
+> `DomainException`, advice, `base-uri` из конфига, auto-configuration) в общий starter;
+> **каталог типов** (enum) остаётся в каждом сервисе. См. `error-handling.md`.
 
 ```java
 // База: доменное исключение знает свой тип проблемы + несёт свои extension-поля

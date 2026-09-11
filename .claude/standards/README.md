@@ -17,6 +17,7 @@
 - [scheduler.md](scheduler.md) — `@Scheduled`, выбор executor-а (virtual threads / пул).
 - [application-config.md](application-config.md) — `application.yml`: структура по концернам, плейсхолдеры, секреты без дефолта.
 - [correlation-and-tracing.md](correlation-and-tracing.md) — `X-Request-Id`, трейсинг, Context↔MDC, проброс к downstream.
+- [error-handling.md](error-handling.md) — `ProblemDetail` (RFC 9457), доменные исключения, реестр типов, вынос в starter.
 
 ## Правила ведения
 
