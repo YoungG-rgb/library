@@ -142,14 +142,81 @@ public interface UserMapper {
 ```
 
 ## Global Exception Handling
+
+Доменные исключения несут **свой `ProblemType`** — тогда один handler на всю иерархию,
+без per-exception `@ExceptionHandler`. (`ProblemType` определён ниже.)
+
 ```java
-public class ResourceNotFoundException extends RuntimeException {
-    public ResourceNotFoundException(String message) {
+// База: доменное исключение знает свой тип проблемы + несёт свои extension-поля
+@Getter
+public abstract class DomainException extends RuntimeException {
+    private final ProblemType problemType;
+    // transient: значения могут быть несериализуемыми, а на web-путь это не влияет
+    private final transient Map<String, Object> properties = new LinkedHashMap<>();
+
+    protected DomainException(ProblemType problemType, String message) {
         super(message);
+        this.problemType = problemType;
+    }
+    protected DomainException(ProblemType problemType, String message, Object... args) {
+        super(org.slf4j.helpers.MessageFormatter.arrayFormat(message, args).getMessage());
+        this.problemType = problemType;
+    }
+
+    /** Добавить extension-поле для ProblemDetail (fluent). */
+    public DomainException with(String key, Object value) {
+        this.properties.put(key, value);
+        return this;
+    }
+}
+
+public class ResourceNotFoundException extends DomainException {
+    public ResourceNotFoundException(String message) {
+        super(ProblemType.RESOURCE_NOT_FOUND, message);
     }
     public ResourceNotFoundException(String message, Object... messageParameters) {
-        super(org.slf4j.helpers.MessageFormatter.arrayFormat(message, messageParameters).getMessage());
+        super(ProblemType.RESOURCE_NOT_FOUND, message, messageParameters);
     }
+}
+
+// Новое доменное исключение = enum-строка + подкласс; extension-поля — через with(...):
+// public class DuplicateEmailException extends DomainException {
+//     public DuplicateEmailException(String email) {
+//         super(ProblemType.CONFLICT, "Email {} already exists", email);
+//         with("email", email);                 // уйдёт в ProblemDetail
+//     }
+// }
+// Либо на месте броска: throw new ResourceNotFoundException("Order {} not found", id).with("orderId", id);
+```
+
+### Рекомендуемо: ProblemDetail (RFC 9457 / `application/problem+json`)
+
+В Boot 3 `@ExceptionHandler` может **возвращать `ProblemDetail` напрямую** — Spring сам
+ставит content-type `application/problem+json`. Стандартные поля: `type` (стабильный
+URI типа проблемы — по нему клиент ветвит логику), `title`, `status`, `detail` (текст
+конкретного случая), `instance`; всё остальное — extension через `setProperty(...)`.
+
+Реестр типов — enum: единый источник правды для `type`-URI + `title` + `status`.
+Новый тип ошибки = одна строка. `type()` резолвиться не обязан, но в идеале ведёт
+на доку типа (см. правила ниже).
+
+```java
+@Getter
+@RequiredArgsConstructor
+public enum ProblemType {
+    //                 slug                  title                     status
+    VALIDATION_ERROR  ("validation-error",   "Validation error",       HttpStatus.BAD_REQUEST),
+    RESOURCE_NOT_FOUND("resource-not-found", "Resource not found",     HttpStatus.NOT_FOUND),
+    CONFLICT          ("conflict",           "Conflict",               HttpStatus.CONFLICT),
+    INTERNAL_ERROR    ("internal-error",     "Internal server error",  HttpStatus.INTERNAL_SERVER_ERROR);
+
+    private static final String BASE = "https://errors.example.com/problems/";  // свой домен / URN
+
+    private final String slug;
+    private final String title;
+    private final HttpStatus status;
+
+    public URI type() { return URI.create(BASE + slug); }
 }
 ```
 
@@ -158,88 +225,141 @@ public class ResourceNotFoundException extends RuntimeException {
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleNotFound(ResourceNotFoundException ex, WebRequest request) {
-        log.error("Resource not found: {}", ex.getMessage());
-        ErrorResponse errorResponse = ErrorResponse.of(HttpStatus.NOT_FOUND, ex.getMessage(),
-                request.getDescription(false));
-
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorResponse);
+    @ExceptionHandler(DomainException.class)
+    public ProblemDetail handleDomain(DomainException ex, HttpServletRequest req) {
+        log.warn("{}: {}", ex.getProblemType(), ex.getMessage());
+        ProblemDetail pd = problem(ex.getProblemType(), ex.getMessage(), req);
+        ex.getProperties().forEach(pd::setProperty);   // разные props у разных исключений
+        return pd;
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ValidationErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
-        ValidationErrorResponse response = ValidationErrorResponse.of(HttpStatus.BAD_REQUEST);
-        ex.getBindingResult().getFieldErrors().forEach(response::addError);
-
-        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+    public ProblemDetail handleValidation(MethodArgumentNotValidException ex, HttpServletRequest req) {
+        ProblemDetail pd = problem(ProblemType.VALIDATION_ERROR, "Request validation failed", req);
+        Map<String, String> errors = ex.getBindingResult().getFieldErrors().stream()
+                .collect(Collectors.toMap(FieldError::getField,
+                        fe -> Optional.ofNullable(fe.getDefaultMessage()).orElse("Invalid value"),
+                        (a, b) -> a));
+        pd.setProperty("errors", errors);                       // extension-поле
+        return pd;
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<ErrorResponse> handleDataIntegrity(DataIntegrityViolationException ex, WebRequest request) {
-        log.error("Data integrity violation", ex);
-        ErrorResponse error = ErrorResponse.of(HttpStatus.CONFLICT,
-                "Data integrity violation - resource may already exist",
-                request.getDescription(false)
-        );
-        return new ResponseEntity<>(error, HttpStatus.CONFLICT);
+    public ProblemDetail handleConflict(DataIntegrityViolationException ex, HttpServletRequest req) {
+        log.warn("Data integrity violation", ex);               // детали БД — только в лог
+        return problem(ProblemType.CONFLICT, "Resource conflict — may already exist", req);
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> handleGlobalException(Exception ex, WebRequest request) {
-        log.error("Unexpected error", ex);
-        ErrorResponse error = ErrorResponse.of(
-                HttpStatus.INTERNAL_SERVER_ERROR,
-                "An unexpected error occurred",
-                request.getDescription(false)
-        );
-        return new ResponseEntity<>(error, HttpStatus.INTERNAL_SERVER_ERROR);
+    public ProblemDetail handleUnexpected(Exception ex, HttpServletRequest req) {
+        log.error("Unexpected error", ex);                      // стектрейс — только в лог
+        return problem(ProblemType.INTERNAL_ERROR, "Internal error", req);  // detail для 5xx — generic
+    }
+
+    private ProblemDetail problem(ProblemType t, String detail, HttpServletRequest req) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(t.getStatus(), detail);
+        pd.setType(t.type());
+        pd.setTitle(t.getTitle());
+        pd.setInstance(URI.create(req.getRequestURI()));
+        return pd;
     }
 }
+```
 
+**Правила реестра `type`:** стабильность — опубликовал URI, не меняешь (это контракт);
+один тип на **семантику**, не на статус (у 409 могут быть разные типы —
+`duplicate-email` vs `version-conflict`); namespace под свой домен или URN; `about:blank`
+как дефолт, если специфичного типа нет; резолвиться URI не обязан, но в идеале ведёт на
+доку типа (страница/якорь в API-доках).
+
+Чтобы **встроенные** исключения Spring (404 на роут, 405, 415…) тоже отдавались как
+problem+json — включи флаг:
+
+```yaml
+spring:
+  mvc:
+    problemdetails:
+      enabled: true          # WebFlux: spring.webflux.problemdetails.enabled
+```
+
+Для тонкой настройки встроенных — расширь `ResponseEntityExceptionHandler` и переопредели
+нужные `handle*`, дополняя `ProblemDetail` extension-полями.
+
+### Что уходит по проводу
+
+```
+HTTP/1.1 400 Bad Request
+Content-Type: application/problem+json
+```
+```json
+{
+  "type": "https://errors.example.com/validation-error",
+  "title": "Validation error",
+  "status": 400,
+  "detail": "Request validation failed",
+  "instance": "/api/v1/users",
+  "errors": { "email": "must be a well-formed email", "age": "must be >= 18" },
+  "requestId": "3f9c2a1e-7b0d-4b2a-9f1e-2c8d5a6b7c1d"
+}
+```
+
+### Как потребляют другие системы
+
+Ветвление — по `type` (стабильный URI), **не** по тексту `detail`.
+
+```java
+// Java-клиент (RestClient): Spring сам десериализует problem+json в ProblemDetail
+catch (RestClientResponseException e) {
+    ProblemDetail pd = e.getResponseBodyAs(ProblemDetail.class);
+    if (pd != null && pd.getType().toString().endsWith("/validation-error")) {
+        Object errors = pd.getProperties().get("errors");           // extension
+    }
+    String requestId = pd == null ? null
+            : String.valueOf(pd.getProperties().get("requestId"));  // для саппорта/логов
+}
+```
+
+```js
+// JS/фронт
+if (!res.ok && res.headers.get("content-type")?.includes("application/problem+json")) {
+  const p = await res.json();
+  switch (p.type) {
+    case "https://errors.example.com/validation-error": showFieldErrors(p.errors); break;
+    default: toast(`${p.title}: ${p.detail} (id: ${p.requestId})`);
+  }
+}
+```
+
+**Правила для потребителей** (задокументируй в API-контракте): проверяй content-type
+перед парсингом; ветви по `type`, не по `detail`; неизвестный `type` → fallback на
+`status` + `title`; `instance` + `requestId` → корреляция с логами.
+
+### Legacy: `ApiError` (только для обратной совместимости)
+
+Плоский самописный формат. Оставляй, **только** если есть старые потребители, завязанные
+на `{status,message,path}`; новый код — на `ProblemDetail` выше.
+
+> ⚠️ Не называй класс `ErrorResponse` — коллизия с интерфейсом
+> `org.springframework.web.ErrorResponse` (обёртка над `ProblemDetail`). Отдаётся как
+> `application/json`, а не `application/problem+json` — вне RFC 9457.
+
+```java
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Accessors(chain = true)
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class ErrorResponse {
-    int status;
+public class ApiError {
+    int status = 500;
     String message;
     String path;
-    LocalDateTime timestamp;
+    Map<String, String> errors = new HashMap<>();
+    LocalDateTime timestamp = LocalDateTime.now();
 
-    public ErrorResponse of(HttpStatus httpStatus, String message, String path){
-        return new ErrorResponse()
-                .setTimestamp(LocalDateTime.now())
+    public static ApiError of(HttpStatus httpStatus, String message, String path) {
+        return new ApiError()
                 .setPath(path)
                 .setMessage(message)
-                .setStatus(httpStatus.value());
-    }
-}
-
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-@Accessors(chain = true)
-@FieldDefaults(level = AccessLevel.PRIVATE)
-public class ValidationErrorResponse {
-    int status;
-    String message;
-    Map<String, String> errors = new HashMap<>();
-    LocalDateTime timestamp;
-
-    public static ValidationErrorResponse of(HttpStatus httpStatus, String message, Map<String, String> errors) {
-        return new ValidationErrorResponse()
-                .setTimestamp(LocalDateTime.now())
-                .setMessage(message)
-                .setStatus(httpStatus.value())
-                .setErrors(errors);
-    }
-
-    public static ValidationErrorResponse of(HttpStatus httpStatus) {
-        return new ValidationErrorResponse()
-                .setTimestamp(LocalDateTime.now())
-                .setMessage("Validation failed")
                 .setStatus(httpStatus.value());
     }
 

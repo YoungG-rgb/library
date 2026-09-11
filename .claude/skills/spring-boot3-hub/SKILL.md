@@ -35,6 +35,20 @@ metadata:
 делегировать её нужному специализированному скиллу / стандарту / reference-файлу и
 проследить за сквозными ограничениями. Глубину не дублируем — она живёт в одном месте.
 
+## Spring Boot 3 Essentials (что специфично для 3.x)
+
+Скилл действует ТОЛЬКО для Spring Boot 3+. Отличия от 2.x — фиксируй как якоря при работе:
+
+- **Java-база**: 17 (Boot 3.0–3.1), 17+ (3.2+). Для **virtual threads** и **structured concurrency** нужен **Java 21+** (см. `concurrency-review`).
+- **Jakarta namespace**: `jakarta.*` вместо `javax.*` (`jakarta.persistence`, `jakarta.validation`, `jakarta.servlet`). Любой `javax.*` в Boot 3 — красный флаг миграции.
+- **Spring Security 6**: только lambda-DSL + бин `SecurityFilterChain`. `WebSecurityConfigurerAdapter` удалён. → `references/security.md`.
+- **Ошибки**: встроенный **ProblemDetail** (RFC 7807/9457) в `@RestControllerAdvice` вместо самописных error-DTO. → `references/web.md`.
+- **HTTP-клиенты**: `RestClient` (3.2+, синхронный) и декларативный `@HttpExchange`; `WebClient` — для реактивных путей.
+- **Observability**: **Micrometer Observation API + Micrometer Tracing** вместо Spring Cloud Sleuth (в 3.x его нет). Мост Context↔MDC и `traceparent` → `correlation-and-tracing.md`.
+- **Virtual threads**: включаются флагом `spring.threads.virtual.enabled=true` (3.2+, Java 21+).
+- **Config**: `@ConfigurationProperties` с constructor-binding; `spring.config.import` для внешних источников. → `application-config.md`.
+- **AOT / GraalVM native** — по необходимости (reflection-хинты, `@RegisterReflectionForBinding`).
+
 ## Куда делегировать (routing map)
 
 | Область запроса                                                 | Специализированный скилл | Проектный стандарт                                                       | Reference                |
@@ -50,6 +64,8 @@ metadata:
 | Security: Spring Security 6, OAuth2, JWT                        | —                        | —                                                                        | `references/security.md` |
 | Cloud/Config: config server, discovery, resilience              | —                        | `application-config.md`                                                  | `references/cloud.md`    |
 | Тесты: unit, slice, integration, TestContainers                 | —                        | —                                                                        | `references/testing.md`  |
+| Миграции схемы (Flyway/Liquibase)                               | —                        | `jpa-entity.md` (имена таблиц/sequence)                                  | `references/data.md`     |
+| Observability: метрики, Actuator, трейсинг (Micrometer)         | **`logging-patterns`**   | `correlation-and-tracing.md`                                             | `references/cloud.md`    |
 
 **Правило маршрутизации:** если для области есть специализированный скилл — приоритет у него; этот скилл лишь связывает области и следит за сквозными правилами.
 
@@ -128,4 +144,4 @@ metadata:
 
 ## Knowledge Base
 
-Spring Boot 3.x, Java 17+, Spring WebFlux, Project Reactor, Spring Data JPA, Spring Security 6, OAuth2/JWT, Hibernate, R2DBC, Spring Cloud, Resilience4j, Micrometer, JUnit 5, TestContainers, Mockito, Maven/Gradle.
+Spring Boot 3.x (Java 17 — база; Java 21+ для virtual threads / structured concurrency), Spring WebFlux, Project Reactor, Spring Data JPA, Spring Security 6, OAuth2/JWT, Hibernate, R2DBC, Spring Cloud, Resilience4j, Micrometer (Observation + Tracing), JUnit 5, TestContainers, Mockito, Maven/Gradle.

@@ -152,7 +152,9 @@ class UserControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
-    @MockBean
+    // Boot 3.4+ (Spring Framework 6.2): org.springframework.test.context.bean.override.mockito.MockitoBean
+    // На Boot < 3.4 используй @MockBean (устарел в 3.4).
+    @MockitoBean
     private UserService userService;
 
     @Autowired
@@ -373,7 +375,7 @@ class UserReactiveControllerTest {
     @Autowired
     private WebTestClient webTestClient;
 
-    @MockBean
+    @MockitoBean  // Boot 3.4+; на Boot < 3.4 — @MockBean
     private UserReactiveService userService;
 
     @Test
@@ -525,7 +527,7 @@ public class TestDataFactory {
 | `@WebMvcTest` | Test MVC controllers with mocked services |
 | `@WebFluxTest` | Test reactive controllers |
 | `@DataJpaTest` | Test JPA repositories with in-memory database |
-| `@MockBean` | Add mock bean to Spring context |
+| `@MockitoBean` | Mock bean in context (Boot 3.4+; ранее `@MockBean`, устарел в 3.4) |
 | `@WithMockUser` | Mock authenticated user for security tests |
 | `@Testcontainers` | Enable Testcontainers support |
 | `@ActiveProfiles` | Activate specific Spring profiles for test |
