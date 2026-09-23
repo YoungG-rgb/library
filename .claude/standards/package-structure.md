@@ -60,7 +60,7 @@
 - Глобальные конфиги (Jackson, Security, общий ObjectMapper) — в `shared.config`, **не** здесь.
 
 ### Дополнительные подпакеты (по необходимости)
-- `mapper` — если маппинг entity↔dto разрастается.
+- `mapper` — если маппинг entity↔dto разрастается. См. [mapstruct.md](mapstruct.md).
 - `event` / `listener` — внутренние domain events (Spring `ApplicationEvent`).
 - `scheduler` — `@Scheduled`-таски, если их несколько.
 

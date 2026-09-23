@@ -156,7 +156,11 @@ public class ContextPropagationConfig {
 - Зависимость: `io.micrometer:context-propagation` (в Boot 3.x тянется micrometer'ом).
 - В сервлетном стеке мост не нужен — MDC живёт на том же потоке.
 
-## Egress — проброс к downstream (WebClient)
+## Egress — проброс к downstream
+
+Механизм зависит от стека: реактивный — `WebClient` + `ExchangeFilterFunction`, сервлетный — `RestClient` + `ClientHttpRequestInterceptor`. Правило общее: **белый список бизнес-ключей**, `traceparent` в него не входит.
+
+### Реактивный стек (WebClient)
 
 - Один фильтр с **белым списком** ключей из Context. Не плоди фильтр на каждый заголовок.
 - В список кладёшь **только бизнес-ключи**. `traceparent` НЕ указывай — его проставит трейсинг.
@@ -187,6 +191,42 @@ public class ContextHeadersPropagationFilter implements ExchangeFilterFunction {
 - Порядок фильтров на `WebClient` (первый добавленный = внешний): `propagate` → `logging` → `metrics/timeout`.
   - **Почему:** id проставляется до наблюдения; логирующий — внешний, меряет весь вызов; метрик-фильтр — внутренний, видит сырую сетевую ошибку.
 - Если WebClient зовётся вне пайплайна запроса (шедулер, `.block()` в отдельном потоке) — Context пуст. Генери id на старте задачи и клади через `.contextWrite(...)`.
+
+### Сервлетный стек (RestClient)
+
+В сервлетном стеке источник значений — **MDC**, а не reactor Context. Интерцептор регистрируется один раз через `RestClientCustomizer` и применяется ко всем клиентам, собранным из автоконфигурированного билдера.
+
+```java
+public class CorrelationPropagationInterceptor implements ClientHttpRequestInterceptor {
+
+    private static final List<String> PROPAGATED = Arrays.stream(CorrelationHeader.values())
+            .filter(CorrelationHeader::isPropagateDownstream)
+            .map(CorrelationHeader::getHeader)
+            .toList();
+
+    @Override
+    public ClientHttpResponse intercept(HttpRequest request, byte[] body, ClientHttpRequestExecution execution)
+            throws IOException {
+        for (String header : PROPAGATED) {
+            String value = MDC.get(header);
+            if (value != null && !request.getHeaders().containsKey(header)) {
+                request.getHeaders().add(header, value);
+            }
+        }
+        return execution.execute(request, body);
+    }
+}
+```
+
+```java
+@Bean
+public RestClientCustomizer correlationRestClientCustomizer() {
+    return builder -> builder.requestInterceptor(new CorrelationPropagationInterceptor());
+}
+```
+
+- **Клиент собирай только из внедрённого `RestClient.Builder`.** `RestClient.create()` не проходит через `RestClientCustomizer` и не инструментируется трейсингом — оборвутся сразу оба механизма, и бизнес-корреляция, и `traceparent`. Это самая частая причина «трейс есть, но рвётся на границе сервисов».
+- Вызов вне HTTP-запроса (шедулер, worker) видит пустой MDC. Клади id в MDC на старте задачи и снимай в `finally`, как в ингресс-фильтре.
 
 ## Запрещено
 
